@@ -1,13 +1,24 @@
 type StatCardProps = {
   title: string;
   value: number;
+  icon: string;
 };
 
-export default function StatCard({ title, value }: StatCardProps) {
+export default function StatCard({ title, value, icon }: StatCardProps) {
   return (
-    <div className="rounded-2xl border bg-white p-6">
-      <h3 className="text-2xl font-medium text-gray-700">{title}</h3>
-      <p className="mt-2 text-4xl font-bold">{value}</p>
+    <div className="flex items-center gap-4 rounded-2xl border border-[#d7d7d7] bg-[#eef1f5] px-5 py-5 shadow-sm">
+      <span className="material-symbols-outlined text-[40px] text-[#1B7895]">
+        {icon}
+      </span>
+
+      <div>
+        <h3 className="text-[18px] font-medium text-black leading-tight">
+          {title}
+        </h3>
+        <p className="mt-1 text-[24px] font-bold leading-none text-black">
+          {value}
+        </p>
+      </div>
     </div>
   );
 }
