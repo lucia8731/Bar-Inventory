@@ -1,0 +1,79 @@
+name: Check
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      SESSION_SECRET: integration-test-secret-at-least-32-characters
+      PUBLIC_APP_URL: http://testserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - run: python -m unittest discover -s tests -v
+  container:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t bar-inventory .
+      - name: Start and check application
+        run: |
+          docker run -d --name bar-test --network host -e DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres -e SESSION_SECRET=integration-test-secret-at-least-32-characters -e PUBLIC_APP_URL=http://127.0.0.1:10000 bar-inventory
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:10000/api/session > /tmp/session.json; then grep -q '"user":null' /tmp/session.json && exit 0; fi
+            sleep 2
+          done
+          docker logs bar-test
+          exit 1
+  blueprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install jsonschema pyyaml
+      - name: Validate against Render's published schema
+        run: |
+          python -c "import json, urllib.request, yaml, jsonschema; schema=json.load(urllib.request.urlopen('https://render.com/schema/render.yaml.json')); jsonschema.validate(yaml.safe_load(open('render.yaml')), schema)"
