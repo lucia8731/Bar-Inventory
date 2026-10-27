@@ -8,7 +8,7 @@ from tools.generate_catalog import build, ROOT
 class CatalogTests(unittest.TestCase):
     def test_curated_catalog_and_generated_seed(self):
         sql = build(ROOT / 'data' / 'ingredients.csv')
-        self.assertEqual(sql, (ROOT / 'supabase' / 'seed.sql').read_text(encoding='utf-8'))
+        self.assertEqual(sql, (ROOT / 'backend' / 'seed.sql').read_text(encoding='utf-8'))
         with (ROOT / 'data' / 'ingredients.csv').open(encoding='utf-8', newline='') as f:
             self.assertGreaterEqual(len(list(csv.DictReader(f))), 200)
         self.assertIn("('Gin", sql)

@@ -1,30 +1,41 @@
 # Bar Inventory
 
-A simple bar inventory app built with Next.js, TypeScript, Supabase and Python. Browse a curated catalog, manage stock, save recipes and deduct ingredients when you make cocktails.
+A minimal inventory app for your bar, built with Next.js, TypeScript, a Python FastAPI backend, and PostgreSQL. Search a curated catalog, manage ingredients and recipes, and deduct stock when making cocktails.
 
 ## Features
 
-- Browse 272 default ingredients, search by name and filter by category.
-- Add ingredients from the catalog or create your own; record stock and a low-stock threshold in ml or pieces.
-- Dashboard shows inventory, low-stock items and cocktail counts.
-- Create cocktails and recipes using items in your inventory. Making a cocktail deducts its ingredients in a single database transaction; insufficient stock prevents the deduction.
-- Google sign-in, individual profiles and per-user data isolation using Supabase Row Level Security.
-- Python validates the ingredient CSV and produces the SQL seed file.
+- Browse 272 ingredients, search and filter by category, and add custom ingredients.
+- Track quantities and low-stock thresholds in ml or pieces.
+- Dashboard for stock and recipes.
+- Create recipes and record drinks. A PostgreSQL transaction locks the relevant rows and rejects the entire operation if stock is insufficient.
+- Google OAuth sign-in, profiles and server-enforced per-user data isolation.
+- A Python validator generates the PostgreSQL catalog seed from CSV.
 
-## Setup
+## Run locally
 
-1. Create a Supabase project. In its SQL Editor, run `supabase/schema.sql`, then `supabase/seed.sql`. These scripts are intended for a **new, empty project** and will create tables and policies. Do not run them over an existing database without reviewing a migration first.
-2. Enable the Google provider in Supabase Authentication and configure its Google OAuth client. Add your app URL (for local use, `http://localhost:3000`) to Supabase Auth URL Configuration as an allowed redirect URL; configure the Google provider callback URL shown by Supabase in your Google Cloud OAuth client.
-3. Copy `.env.example` to `.env.local`. Set the project URL and publishable/anon key from Supabase. Do not use a service-role key in the browser.
-4. Install dependencies with `npm install`, then run `npm run dev` and open `http://localhost:3000`.
-5. Sign in with Google and browse **Ingredients**. Add items to your inventory, enter their current quantities and low-stock thresholds, then create cocktails using those items.
+Requirements: Node.js 22, Python 3.10+, PostgreSQL, and Google OAuth credentials.
 
-Use the same unit for each ingredient's stock and the amount in a recipe. Removing an ingredient used in a recipe is blocked until it is removed from the recipe. This helps avoid accidentally losing recipe data.
+1. Create an empty PostgreSQL database, for example `bar_inventory`.
+2. In Google Cloud, create an OAuth web application. Add `http://localhost:3000` as an authorized JavaScript origin and `http://localhost:3000/api/auth/callback` as an authorized redirect URI. Google OAuth consent screen setup is also required.
+3. Copy `backend/.env.example` to `backend/.env` and fill in the database URL, Google credentials and a long random session secret. Do not commit this file. For example, generate a secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+4. Install and start the API from the repository root:
 
-## Catalog maintenance
+   ```sh
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r backend/requirements.txt
+   set -a; source backend/.env; set +a
+   uvicorn backend.main:app --reload --port 8000
+   ```
 
-Edit `data/ingredients.csv`, then run `python3 tools/generate_catalog.py`. The script checks column names, missing fields, valid units, duplicates and the minimum catalog size; it writes `supabase/seed.sql`. Run the generated seed in Supabase to update the shared catalog. Run the Python tests with `python3 -m unittest discover -s tests`.
+   The API creates its tables and validates/imports the catalog on startup. Use a fresh database; do not point it at a database containing unrelated tables.
+5. In another terminal, copy `.env.example` to `.env.local`, run `npm install` and `npm run dev`, and open `http://localhost:3000`.
+6. Sign in with Google. Add items from **Ingredients**, enter their quantities, then create cocktails using those items. Recipe amounts use the same units as the inventory item. An item used in a recipe cannot be deleted until it is removed from that recipe.
 
-## Deployment
+## Production setup
 
-Set the same public environment variables in your hosting provider and add the deployed URL to the Supabase Auth redirect allowlist. A working Supabase project and a configured Google OAuth provider are required; the app displays a setup message when environment variables are missing.
+Run PostgreSQL and the Python service on private infrastructure. Set `DATABASE_URL`, `SESSION_SECRET`, `PUBLIC_APP_URL` (HTTPS origin without a trailing slash), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `APP_ENV=production` for the API. Set `BACKEND_URL` for Next.js to the private Python service URL; Next.js proxies `/api/*` so cookies and browser requests remain same-origin. Add the production origin and callback URL to Google OAuth. Use a strong unique session secret, HTTPS, database backups and deployment-specific network controls. The API should not be exposed directly to browsers.
+
+## Validation
+
+Run `python tools/generate_catalog.py` after editing `data/ingredients.csv`; it checks for missing values, valid units, duplicates and at least 200 rows. Run `python -m unittest discover -s tests -p 'test_catalog.py'`. API integration tests use a disposable PostgreSQL database and run in GitHub Actions. Never run them against a production database.
