@@ -105,10 +105,11 @@ def state(request: Request):
     with db() as conn:
         return {
             'profile': conn.execute('select display_name from app_users where id=%s', (uid,)).fetchone(),
-            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold from inventory where user_id=%s order by name', (uid,)).fetchall(),
+            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
+            'activity': conn.execute('select id, item_name, unit, change, reason, created_at from stock_events where user_id=%s order by created_at desc, id desc limit 100', (uid,)).fetchall(),
         }
 
 class NewItem(BaseModel):
@@ -120,6 +121,9 @@ class NewItem(BaseModel):
 class Stock(BaseModel):
     quantity: float = Field(ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(ge=0, allow_inf_nan=False)
+    target_stock: float = Field(default=0, ge=0, allow_inf_nan=False)
+    supplier: str = Field(default='', max_length=120)
+    image_url: str = Field(default='', max_length=2048)
 class Name(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 class Recipe(BaseModel):
@@ -147,9 +151,14 @@ def add_item(data: NewItem, request: Request):
 
 @app.patch('/api/inventory/{item_id}')
 def update_item(item_id: UUID, data: Stock, request: Request):
+    uid = user_id(request)
+    if data.image_url and not data.image_url.startswith('https://'):
+        raise HTTPException(400, 'Image URL must start with https://')
     with db() as conn:
-        result = conn.execute('update inventory set quantity=%s, low_stock_threshold=%s where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, item_id, user_id(request)))
-        if not result.rowcount: raise HTTPException(404, 'Ingredient not found')
+        item = conn.execute('select name, unit, quantity from inventory where id=%s and user_id=%s for update', (item_id, uid)).fetchone()
+        if not item: raise HTTPException(404, 'Ingredient not found')
+        conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), item_id, uid))
+        conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) select %s,%s,%s,%s,%s::numeric-%s,%s where %s::numeric <> %s', (uuid4(), uid, item['name'], item['unit'], data.quantity, item['quantity'], 'Stock adjustment', data.quantity, item['quantity']))
     return {'ok': True}
 
 @app.delete('/api/inventory/{item_id}')
@@ -197,14 +206,17 @@ def make(data: Make, request: Request):
     uid = user_id(request)
     with db() as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
-        rows = conn.execute('''select i.id, i.name, i.quantity, r.amount from recipe_ingredients r
+        cocktail = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id, uid)).fetchone()
+        rows = conn.execute('''select i.id, i.name, i.unit, i.quantity, r.amount from recipe_ingredients r
             join inventory i on i.id=r.inventory_id and i.user_id=r.user_id
             where r.user_id=%s and r.cocktail_id=%s order by i.id for update of i''', (uid, data.cocktail_id)).fetchall()
         if not rows: raise HTTPException(400, 'Add ingredients to this recipe first.')
         for row in rows:
             if row['quantity'] < row['amount'] * data.servings: raise HTTPException(400, f"Insufficient stock: {row['name']}")
         for row in rows:
-            conn.execute('update inventory set quantity=quantity-%s where id=%s and user_id=%s', (row['amount'] * data.servings, row['id'], uid))
+            used = row['amount'] * data.servings
+            conn.execute('update inventory set quantity=quantity-%s where id=%s and user_id=%s', (used, row['id'], uid))
+            conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) values (%s,%s,%s,%s,%s,%s)', (uuid4(), uid, row['name'], row['unit'], -used, f"Made {data.servings} × {cocktail['name']}"))
     return {'ok': True}
 
 @app.put('/api/profile')
