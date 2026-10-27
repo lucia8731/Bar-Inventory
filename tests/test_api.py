@@ -40,6 +40,7 @@ class ApiTests(unittest.TestCase):
         remaining = {i['name']:float(i['quantity']) for i in c.get('/api/state').json()['inventory']}
         self.assertEqual(remaining, {'Gin':50, 'Vermouth':5})
         self.assertEqual(c.delete('/api/inventory/'+items['Gin']['id']).status_code,400)
+        c.cookies.clear()
         c.cookies.set('bar_session', cookie(self.b))
         self.assertEqual(c.get('/api/state').json()['inventory'], [])
         self.assertEqual(c.post('/api/make', json={'cocktail_id':cocktail,'servings':1}).status_code,404)
