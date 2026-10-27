@@ -21,7 +21,7 @@ def stop(signum, frame):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 try:
-    children.append(subprocess.Popen(['/opt/venv/bin/python', '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', '8000']))
+    children.append(subprocess.Popen(['/opt/venv/bin/python', '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', '8000', '--no-access-log']))
     children.append(subprocess.Popen(['node', 'node_modules/next/dist/bin/next', 'start', '-H', '0.0.0.0', '-p', os.environ.get('PORT', '10000')]))
     while not stopping and all(child.poll() is None for child in children):
         time.sleep(0.2)

@@ -35,3 +35,18 @@ create table if not exists recipe_ingredients (
   foreign key (cocktail_id, user_id) references cocktails(id, user_id) on delete cascade,
   foreign key (inventory_id, user_id) references inventory(id, user_id) on delete restrict
 );
+
+-- Additive changes preserve all existing users, inventory and recipes.
+alter table inventory add column if not exists target_stock numeric not null default 0 check (target_stock >= 0);
+alter table inventory add column if not exists supplier text not null default '';
+create table if not exists stock_events (
+  id uuid primary key,
+  user_id uuid not null references app_users(id) on delete cascade,
+  item_name text not null,
+  unit text not null,
+  change numeric not null,
+  reason text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists stock_events_user_time on stock_events (user_id, created_at desc);
+alter table inventory add column if not exists image_url text not null default '';

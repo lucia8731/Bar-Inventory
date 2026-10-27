@@ -1,5 +1,5 @@
 export type Session = { user: { id: string; email: string; display_name: string } };
-type State = { profile: { display_name: string }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[] };
+type State = { profile: { display_name: string }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[] };
 async function send(method: string, path: string, body?: object) {
   const response = await fetch(path, { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json();
