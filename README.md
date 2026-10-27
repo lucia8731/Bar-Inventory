@@ -1,36 +1,30 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bar Inventory
 
-## Getting Started
+A simple bar inventory app built with Next.js, TypeScript, Supabase and Python. Browse a curated catalog, manage stock, save recipes and deduct ingredients when you make cocktails.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Browse 272 default ingredients, search by name and filter by category.
+- Add ingredients from the catalog or create your own; record stock and a low-stock threshold in ml or pieces.
+- Dashboard shows inventory, low-stock items and cocktail counts.
+- Create cocktails and recipes using items in your inventory. Making a cocktail deducts its ingredients in a single database transaction; insufficient stock prevents the deduction.
+- Google sign-in, individual profiles and per-user data isolation using Supabase Row Level Security.
+- Python validates the ingredient CSV and produces the SQL seed file.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Create a Supabase project. In its SQL Editor, run `supabase/schema.sql`, then `supabase/seed.sql`. These scripts are intended for a **new, empty project** and will create tables and policies. Do not run them over an existing database without reviewing a migration first.
+2. Enable the Google provider in Supabase Authentication and configure its Google OAuth client. Add your app URL (for local use, `http://localhost:3000`) to Supabase Auth URL Configuration as an allowed redirect URL; configure the Google provider callback URL shown by Supabase in your Google Cloud OAuth client.
+3. Copy `.env.example` to `.env.local`. Set the project URL and publishable/anon key from Supabase. Do not use a service-role key in the browser.
+4. Install dependencies with `npm install`, then run `npm run dev` and open `http://localhost:3000`.
+5. Sign in with Google and browse **Ingredients**. Add items to your inventory, enter their current quantities and low-stock thresholds, then create cocktails using those items.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Use the same unit for each ingredient's stock and the amount in a recipe. Removing an ingredient used in a recipe is blocked until it is removed from the recipe. This helps avoid accidentally losing recipe data.
 
-## Learn More
+## Catalog maintenance
 
-To learn more about Next.js, take a look at the following resources:
+Edit `data/ingredients.csv`, then run `python3 tools/generate_catalog.py`. The script checks column names, missing fields, valid units, duplicates and the minimum catalog size; it writes `supabase/seed.sql`. Run the generated seed in Supabase to update the shared catalog. Run the Python tests with `python3 -m unittest discover -s tests`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deployment
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Set the same public environment variables in your hosting provider and add the deployed URL to the Supabase Auth redirect allowlist. A working Supabase project and a configured Google OAuth provider are required; the app displays a setup message when environment variables are missing.
