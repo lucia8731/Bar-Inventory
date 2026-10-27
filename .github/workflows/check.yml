@@ -66,3 +66,14 @@ jobs:
           done
           docker logs bar-test
           exit 1
+  blueprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install jsonschema pyyaml
+      - name: Validate against Render's published schema
+        run: |
+          python -c "import json, urllib.request, yaml, jsonschema; schema=json.load(urllib.request.urlopen('https://render.com/schema/render.yaml.json')); jsonschema.validate(yaml.safe_load(open('render.yaml')), schema)"
