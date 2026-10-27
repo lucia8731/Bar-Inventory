@@ -6,7 +6,7 @@ import unittest
 from uuid import uuid4
 from itsdangerous import TimestampSigner
 from fastapi.testclient import TestClient
-from backend.main import app, db, SECRET
+from backend.main import app, db, SECRET, ROOT
 
 
 def cookie(uid):
@@ -16,6 +16,14 @@ def cookie(uid):
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Reproduce the pre-upgrade schema and a real existing user's stock.
+        cls.existing = uuid4()
+        cls.existing_item = uuid4()
+        old_schema = (ROOT / 'backend' / 'schema.sql').read_text(encoding='utf-8').split('-- Additive changes')[0]
+        with db() as conn:
+            conn.execute(old_schema)
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)', (cls.existing, str(cls.existing), 'existing@example.test'))
+            conn.execute('insert into inventory (id,user_id,name,category,unit,quantity) values (%s,%s,%s,%s,%s,%s)', (cls.existing_item, cls.existing, 'Existing stock', 'Gin', 'ml', 321))
         cls.client = TestClient(app, base_url='http://testserver', headers={'Origin': 'http://testserver'})
         cls.client.__enter__()
         cls.a, cls.b = uuid4(), uuid4()
@@ -57,6 +65,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(c.post('/api/make', json={'cocktail_id':cocktail,'servings':1}).status_code,404)
         self.assertEqual(c.patch('/api/inventory/'+items['Gin']['id'],json={'quantity':0,'low_stock_threshold':0}).status_code,404)
         self.assertEqual(c.post('/api/recipes', json={'cocktail_id':cocktail,'inventory_id':items['Gin']['id'],'amount':1}).status_code,404)
+    def test_upgrade_preserves_existing_stock(self):
+        self.client.cookies.clear()
+        self.client.cookies.set('bar_session', cookie(self.existing))
+        result = self.client.get('/api/state')
+        self.assertEqual(result.status_code, 200)
+        item = result.json()['inventory'][0]
+        self.assertEqual((item['name'], item['quantity'], item['target_stock'], item['supplier'], item['image_url']), ('Existing stock', 321, 0, '', ''))
+        self.assertEqual(result.json()['activity'], [])
+
     def test_requires_auth_and_origin(self):
         c = self.client
         c.cookies.clear()

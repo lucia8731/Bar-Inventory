@@ -6,7 +6,7 @@ A minimal inventory app for your bar, built with Next.js, TypeScript, a Python F
 
 - Browse 272 ingredients, search and filter by category, and add custom ingredients.
 - Track quantities and low-stock thresholds in ml or pieces.
-- Dashboard for stock and recipes.
+- Dashboard for stock and recipes.\n- Set target quantities and suppliers to make a shopping list, export inventory or order lists to CSV, and review recent stock activity.\n- Add an optional HTTPS photo URL to each inventory item; the dashboard bar photograph is AI-generated.\n- See how many drinks each recipe can make from current stock.
 - Create recipes and record drinks. A PostgreSQL transaction locks the relevant rows and rejects the entire operation if stock is insufficient.
 - Google OAuth sign-in, profiles and server-enforced per-user data isolation.
 - A Python validator generates the PostgreSQL catalog seed from CSV.
@@ -39,3 +39,4 @@ Run PostgreSQL and the Python service on private infrastructure. Set `DATABASE_U
 ## Validation
 
 Run `python tools/generate_catalog.py` after editing `data/ingredients.csv`; it checks for missing values, valid units, duplicates and at least 200 rows. Run `python -m unittest discover -s tests -p 'test_catalog.py'`. API integration tests use a disposable PostgreSQL database and run in GitHub Actions. Never run them against a production database.
+\n## Existing inventory and stock history\n\nThe database schema applies additive changes on application startup and preserves existing inventory. Activity starts recording when the feature is installed; older changes cannot be reconstructed. Free Render Postgres is temporary and expires; back up or migrate any real data before its expiration.\n
