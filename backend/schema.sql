@@ -50,3 +50,9 @@ create table if not exists stock_events (
 );
 create index if not exists stock_events_user_time on stock_events (user_id, created_at desc);
 alter table inventory add column if not exists image_url text not null default '';
+
+-- Nullable until one-time backfill; a user's later selections are never overwritten.
+alter table catalog add column if not exists container_shape text;
+alter table catalog add column if not exists container_color text;
+alter table inventory add column if not exists container_shape text;
+alter table inventory add column if not exists container_color text;
