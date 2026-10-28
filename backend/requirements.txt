@@ -4,3 +4,4 @@ psycopg[binary]==3.2.9
 Authlib==1.5.2
 httpx==0.28.1
 itsdangerous==2.2.0
+Pillow==12.3.0

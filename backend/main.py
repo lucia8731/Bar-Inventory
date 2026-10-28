@@ -1,5 +1,8 @@
 """Bar Inventory API: Google sign-in, PostgreSQL, and transactional recipes."""
 import os
+import io
+import warnings
+from PIL import Image, ImageOps, UnidentifiedImageError
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -9,7 +12,7 @@ from psycopg import errors
 from psycopg.rows import dict_row
 from authlib.integrations.starlette_client import OAuth
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from tools.appearance import SHAPES, COLORS, infer
 from starlette.middleware.sessions import SessionMiddleware
@@ -108,7 +111,7 @@ def state(request: Request):
     uid = user_id(request)
     with db() as conn:
         return {
-            'profile': conn.execute('select display_name from app_users where id=%s', (uid,)).fetchone(),
+            'profile': conn.execute('select display_name, avatar_version from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name from cocktails where user_id=%s order by name', (uid,)).fetchall(),
@@ -244,4 +247,45 @@ def make(data: Make, request: Request):
 def save_profile(data: Profile, request: Request):
     with db() as conn:
         conn.execute('update app_users set display_name=%s where id=%s', (data.display_name.strip(), user_id(request)))
+    return {'ok': True}
+
+@app.post('/api/profile/photo')
+async def upload_profile_photo(request: Request):
+    uid = user_id(request)
+    payload = bytearray()
+    async for chunk in request.stream():
+        if len(payload) + len(chunk) > 5 * 1024 * 1024:
+            raise HTTPException(413, 'Choose a photo smaller than 5 MB.')
+        payload.extend(chunk)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(payload)) as source:
+                if source.format not in ('JPEG', 'PNG', 'WEBP'):
+                    raise ValueError('Unsupported photo format')
+                if source.width * source.height > 12_000_000:
+                    raise ValueError('Photo dimensions are too large')
+                oriented = ImageOps.exif_transpose(source)
+                cropped = ImageOps.fit(oriented.convert('RGBA'), (256, 256), method=Image.Resampling.LANCZOS)
+                photo = Image.new('RGB', (256, 256), 'white')
+                photo.paste(cropped, mask=cropped.getchannel('A'))
+                output = io.BytesIO()
+                photo.save(output, format='JPEG', quality=85, optimize=True)
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise HTTPException(400, 'Choose a JPG, PNG or WebP photo up to 12 megapixels.')
+    with db() as conn:
+        conn.execute('update app_users set avatar_data=%s, avatar_version=%s where id=%s', (output.getvalue(), uuid4(), uid))
+    return {'ok': True}
+
+@app.get('/api/profile/photo')
+def profile_photo(request: Request):
+    with db() as conn:
+        row = conn.execute('select avatar_data from app_users where id=%s', (user_id(request),)).fetchone()
+    if not row or row['avatar_data'] is None: raise HTTPException(404, 'No profile photo yet.')
+    return Response(bytes(row['avatar_data']), media_type='image/jpeg', headers={'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff'})
+
+@app.delete('/api/profile/photo')
+def remove_profile_photo(request: Request):
+    with db() as conn:
+        conn.execute('update app_users set avatar_data=null, avatar_version=null where id=%s', (user_id(request),))
     return {'ok': True}
