@@ -33,6 +33,8 @@ class ApiTests(unittest.TestCase):
         cls.a, cls.b = uuid4(), uuid4()
         with db() as conn:
             conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s),(%s,%s,%s)', (cls.a,str(cls.a),'a@example.test',cls.b,str(cls.b),'b@example.test'))
+            # Supply appearance for the custom test-only catalog suggestion.
+            conn.execute("update catalog set container_shape='bottle',container_color='clear' where name='Private catalog suggestion'")
     @classmethod
     def tearDownClass(cls):
         cls.client.__exit__(None,None,None)
