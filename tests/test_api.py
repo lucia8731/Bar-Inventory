@@ -35,6 +35,50 @@ class ApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.client.__exit__(None,None,None)
+    def test_sales_and_glass_styles(self):
+        c = self.client
+        owner = uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)',(owner,str(owner),'sales@example.test'))
+        c.cookies.clear()
+        c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.post('/api/inventory',json={'name':'Sales gin','category':'Gin','unit':'ml','quantity':100}).status_code,200)
+        self.assertEqual(c.post('/api/cocktails',json={'name':'Test martini','glass_shape':'martini','glass_color':'clear'}).status_code,200)
+        state=c.get('/api/state').json()
+        item=state['inventory'][0]; drink=state['cocktails'][0]
+        self.assertEqual((drink['glass_shape'],drink['glass_color']),('martini','clear'))
+        self.assertEqual(c.patch('/api/cocktails/'+drink['id'],json={'name':'Test martini','glass_shape':'coupe','glass_color':'rose'}).status_code,200)
+        self.assertEqual(c.patch('/api/cocktails/'+drink['id'],json={'name':'Test martini','glass_shape':'invalid'}).status_code,422)
+        self.assertEqual(c.post('/api/recipes',json={'cocktail_id':drink['id'],'inventory_id':item['id'],'amount':30}).status_code,200)
+        payload={'id':str(uuid4()),'cocktail_id':drink['id'],'quantity':2,'unit_price':1200,'sold_at':'2026-10-28T10:00:00+09:00','payment_method':'card','deduct_stock':True}
+        self.assertEqual(c.post('/api/sales',json=payload).status_code,200)
+        self.assertEqual(c.post('/api/sales',json=payload).status_code,200)
+        state=c.get('/api/state').json()
+        self.assertEqual(state['inventory'][0]['quantity'],40)
+        self.assertEqual(state['sales_summary'],{'revenue':2400,'units':2,'entries':1})
+        self.assertEqual(len(state['activity']),1)
+        self.assertEqual(c.post('/api/sales',json={**payload,'unit_price':1}).status_code,409)
+        self.assertEqual(c.post('/api/sales',json={**payload,'id':str(uuid4())}).status_code,400)
+        state=c.get('/api/state').json()
+        self.assertEqual(state['inventory'][0]['quantity'],40)
+        self.assertEqual(len(state['sales']),1)
+        for field,value in [('unit_price',1.5),('unit_price',-1),('quantity',0),('payment_method','bad'),('sold_at','2026-10-28T10:00:00')]:
+            self.assertEqual(c.post('/api/sales',json={**payload,'id':str(uuid4()),field:value}).status_code,422)
+        custom={'id':str(uuid4()),'item_name':'Snacks','quantity':1,'unit_price':500,'sold_at':'2026-10-28T10:01:00+09:00','payment_method':'cash'}
+        self.assertEqual(c.post('/api/sales',json=custom).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['sales_summary']['revenue'],2900)
+        with TestClient(app): pass
+        state=c.get('/api/state').json()
+        self.assertEqual(len(state['sales']),2)
+        self.assertEqual(state['cocktails'][0]['glass_color'],'rose')
+        c.cookies.clear()
+        c.cookies.set('bar_session',cookie(self.b))
+        self.assertEqual(c.get('/api/state').json()['sales'],[])
+        self.assertEqual(c.post('/api/sales',json={**payload,'id':str(uuid4())}).status_code,404)
+        self.assertEqual(c.patch('/api/cocktails/'+drink['id'],json={'name':'bad'}).status_code,404)
+        c.cookies.clear()
+        self.assertEqual(c.post('/api/sales',json=custom).status_code,401)
+
     def test_stock_and_user_isolation(self):
         c = self.client
         c.cookies.set('bar_session', cookie(self.a))
