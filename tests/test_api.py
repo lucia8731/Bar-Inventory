@@ -89,6 +89,52 @@ class ApiTests(unittest.TestCase):
         c.cookies.clear()
         self.assertEqual(c.post('/api/sales',json=custom).status_code,401)
 
+    def test_inventory_price_and_recipe_amount_changes(self):
+        c=self.client
+        owner=uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)',(owner,str(owner),'editing@example.test'))
+        c.cookies.clear()
+        c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.post('/api/inventory',json={'name':'Editable gin','category':'Gin','unit':'ml','quantity':100,'purchase_price':2500}).status_code,200)
+        self.assertEqual(c.post('/api/cocktails',json={'name':'Editable drink'}).status_code,200)
+        state=c.get('/api/state').json();item=state['inventory'][0];drink=state['cocktails'][0]
+        endpoint='/api/inventory/'+item['id']
+        self.assertEqual(item['purchase_price'],2500)
+        stock={'quantity':100,'low_stock_threshold':0,'purchase_price':3000}
+        self.assertEqual(c.patch(endpoint,json=stock).status_code,200)
+        self.assertEqual(c.patch(endpoint,json={'quantity':100,'low_stock_threshold':0}).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['inventory'][0]['purchase_price'],3000)
+        for price in [-1,1.5,True,10000001]:
+            self.assertEqual(c.patch(endpoint,json={**stock,'purchase_price':price}).status_code,422)
+        recipe='/api/recipes/'+drink['id']+'/'+item['id']
+        self.assertEqual(c.post('/api/recipes',json={'cocktail_id':drink['id'],'inventory_id':item['id'],'amount':30}).status_code,200)
+        self.assertEqual(c.patch(recipe,json={'amount':12.5}).status_code,200)
+        state=c.get('/api/state').json()
+        self.assertEqual(state['ingredients'][0]['amount'],12.5)
+        self.assertEqual(state['inventory'][0]['quantity'],100)
+        self.assertEqual(state['activity'],[])
+        for amount in [0,-1]:
+            self.assertEqual(c.patch(recipe,json={'amount':amount}).status_code,422)
+        self.assertEqual(c.patch('/api/recipes/'+drink['id']+'/'+str(uuid4()),json={'amount':1}).status_code,404)
+        self.assertEqual(c.delete(endpoint).status_code,400)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(self.b))
+        self.assertEqual(c.patch(recipe,json={'amount':1}).status_code,404)
+        self.assertEqual(c.delete(endpoint).status_code,404)
+        self.assertEqual(c.patch(endpoint,json=stock).status_code,404)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        with TestClient(app): pass
+        state=c.get('/api/state').json()
+        self.assertEqual(state['inventory'][0]['purchase_price'],3000)
+        self.assertEqual(state['ingredients'][0]['amount'],12.5)
+        self.assertEqual(c.patch(endpoint,json={**stock,'purchase_price':None}).status_code,200)
+        self.assertIsNone(c.get('/api/state').json()['inventory'][0]['purchase_price'])
+        self.assertEqual(c.delete(recipe).status_code,200)
+        self.assertEqual(c.delete(endpoint).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['inventory'],[])
+        c.cookies.clear()
+        self.assertEqual(c.patch(recipe,json={'amount':1}).status_code,401)
+
     def test_stock_and_user_isolation(self):
         c = self.client
         c.cookies.set('bar_session', cookie(self.a))
