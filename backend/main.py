@@ -2,6 +2,8 @@
 import os
 import io
 import warnings
+import hashlib
+from datetime import datetime
 from PIL import Image, ImageOps, UnidentifiedImageError
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -114,8 +116,10 @@ def state(request: Request):
             'profile': conn.execute('select display_name, avatar_version from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
-            'cocktails': conn.execute('select id, name from cocktails where user_id=%s order by name', (uid,)).fetchall(),
+            'cocktails': conn.execute('select id, name, glass_shape, glass_color from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
+            'sales': conn.execute('select id, item_name, quantity, unit_price, sold_at, payment_method, note, stock_deducted from sales where user_id=%s order by sold_at desc, id desc limit 500', (uid,)).fetchall(),
+            'sales_summary': conn.execute('select coalesce(sum(quantity * unit_price::bigint),0) as revenue, coalesce(sum(quantity),0) as units, count(*) as entries from sales where user_id=%s', (uid,)).fetchone(),
             'activity': conn.execute('select id, item_name, unit, change, reason, created_at from stock_events where user_id=%s order by created_at desc, id desc limit 100', (uid,)).fetchall(),
         }
 
@@ -149,6 +153,42 @@ class Stock(Appearance):
     image_url: str = Field(default='', max_length=2048)
 class Name(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+GLASSES = {'coupe','martini','rocks','highball','collins','wine','flute','hurricane'}
+class CocktailStyle(Name):
+    glass_shape: str = 'coupe'
+    glass_color: str = 'gold'
+    @field_validator('glass_shape')
+    @classmethod
+    def valid_glass(cls, value):
+        if value not in GLASSES: raise ValueError('Invalid glass shape')
+        return value
+    @field_validator('glass_color')
+    @classmethod
+    def valid_glass_color(cls, value):
+        if value not in COLORS: raise ValueError('Invalid glass color')
+        return value
+
+class Sale(BaseModel):
+    id: UUID
+    cocktail_id: UUID | None = None
+    item_name: str = Field(default='', max_length=120)
+    quantity: int = Field(ge=1, le=1000, strict=True)
+    unit_price: int = Field(ge=0, le=10000000, strict=True)
+    sold_at: datetime
+    payment_method: str
+    note: str = Field(default='', max_length=500)
+    deduct_stock: bool = False
+    @field_validator('sold_at')
+    @classmethod
+    def aware_time(cls, value):
+        if value.utcoffset() is None: raise ValueError('A timezone is required')
+        return value
+    @field_validator('payment_method')
+    @classmethod
+    def valid_payment(cls, value):
+        if value not in {'cash','card','other'}: raise ValueError('Invalid payment method')
+        return value
+
 class Recipe(BaseModel):
     cocktail_id: UUID
     inventory_id: UUID
@@ -193,8 +233,15 @@ def delete_item(item_id: UUID, request: Request):
     return {'ok': True}
 
 @app.post('/api/cocktails')
-def add_cocktail(data: Name, request: Request):
-    with db() as conn: conn.execute('insert into cocktails (id,user_id,name) values (%s,%s,%s)', (uuid4(), user_id(request), trimmed(data.name)))
+def add_cocktail(data: CocktailStyle, request: Request):
+    with db() as conn: conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color) values (%s,%s,%s,%s,%s)', (uuid4(), user_id(request), trimmed(data.name), data.glass_shape, data.glass_color))
+    return {'ok': True}
+
+@app.patch('/api/cocktails/{cocktail_id}')
+def update_cocktail(cocktail_id: UUID, data: CocktailStyle, request: Request):
+    with db() as conn:
+        result = conn.execute('update cocktails set name=%s, glass_shape=%s, glass_color=%s where id=%s and user_id=%s', (trimmed(data.name), data.glass_shape, data.glass_color, cocktail_id, user_id(request)))
+        if not result.rowcount: raise HTTPException(404, 'Cocktail not found')
     return {'ok': True}
 
 @app.delete('/api/cocktails/{cocktail_id}')
@@ -225,22 +272,25 @@ def delete_recipe(cocktail_id: UUID, item_id: UUID, request: Request):
         if not result.rowcount: raise HTTPException(404, 'Recipe ingredient not found')
     return {'ok': True}
 
+def consume_stock(conn, uid, cocktail_id, servings, reason):
+    rows = conn.execute('''select i.id, i.name, i.unit, i.quantity, r.amount from recipe_ingredients r
+        join inventory i on i.id=r.inventory_id and i.user_id=r.user_id
+        where r.user_id=%s and r.cocktail_id=%s order by i.id for update of i''', (uid, cocktail_id)).fetchall()
+    if not rows: raise HTTPException(400, 'Add ingredients to this recipe first.')
+    for row in rows:
+        if row['quantity'] < row['amount'] * servings: raise HTTPException(400, f"Insufficient stock: {row['name']}")
+    for row in rows:
+        used = row['amount'] * servings
+        conn.execute('update inventory set quantity=quantity-%s where id=%s and user_id=%s', (used, row['id'], uid))
+        conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) values (%s,%s,%s,%s,%s,%s)', (uuid4(), uid, row['name'], row['unit'], -used, reason))
+
 @app.post('/api/make')
 def make(data: Make, request: Request):
     uid = user_id(request)
     with db() as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
         cocktail = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id, uid)).fetchone()
-        rows = conn.execute('''select i.id, i.name, i.unit, i.quantity, r.amount from recipe_ingredients r
-            join inventory i on i.id=r.inventory_id and i.user_id=r.user_id
-            where r.user_id=%s and r.cocktail_id=%s order by i.id for update of i''', (uid, data.cocktail_id)).fetchall()
-        if not rows: raise HTTPException(400, 'Add ingredients to this recipe first.')
-        for row in rows:
-            if row['quantity'] < row['amount'] * data.servings: raise HTTPException(400, f"Insufficient stock: {row['name']}")
-        for row in rows:
-            used = row['amount'] * data.servings
-            conn.execute('update inventory set quantity=quantity-%s where id=%s and user_id=%s', (used, row['id'], uid))
-            conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) values (%s,%s,%s,%s,%s,%s)', (uuid4(), uid, row['name'], row['unit'], -used, f"Made {data.servings} × {cocktail['name']}"))
+        consume_stock(conn, uid, data.cocktail_id, data.servings, f"Made {data.servings} × {cocktail['name']}")
     return {'ok': True}
 
 @app.put('/api/profile')
@@ -288,4 +338,28 @@ def profile_photo(request: Request):
 def remove_profile_photo(request: Request):
     with db() as conn:
         conn.execute('update app_users set avatar_data=null, avatar_version=null where id=%s', (user_id(request),))
+    return {'ok': True}
+
+@app.post('/api/sales')
+def record_sale(data: Sale, request: Request):
+    uid = user_id(request)
+    fingerprint = hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+    with db() as conn:
+        # Serialize retries so a successful sale cannot consume stock twice.
+        conn.execute('select pg_advisory_xact_lock(%s)', (data.id.int % (2**63-1),))
+        existing = conn.execute('select user_id,request_hash from sales where id=%s', (data.id,)).fetchone()
+        if existing:
+            if str(existing['user_id']) != str(uid) or existing['request_hash'] != fingerprint:
+                raise HTTPException(409, 'This sale reference has already been used.')
+            return {'ok': True}
+        name = data.item_name.strip()
+        if data.cocktail_id:
+            lock_cocktail(conn, uid, data.cocktail_id)
+            name = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id,uid)).fetchone()['name']
+        elif data.deduct_stock:
+            raise HTTPException(400, 'Select a cocktail to deduct recipe stock.')
+        if not name: raise HTTPException(400, 'Enter an item name or select a cocktail.')
+        if data.deduct_stock:
+            consume_stock(conn, uid, data.cocktail_id, data.quantity, f'Sale: {name}')
+        conn.execute('insert into sales (id,user_id,cocktail_id,item_name,quantity,unit_price,sold_at,payment_method,note,stock_deducted,request_hash) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (data.id,uid,data.cocktail_id,name,data.quantity,data.unit_price,data.sold_at,data.payment_method,data.note.strip(),data.deduct_stock,fingerprint))
     return {'ok': True}

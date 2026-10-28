@@ -60,3 +60,21 @@ alter table inventory add column if not exists container_color text;
 -- Small profile photos persist with the user's database record.
 alter table app_users add column if not exists avatar_data bytea;
 alter table app_users add column if not exists avatar_version uuid;
+
+alter table cocktails add column if not exists glass_shape text not null default 'coupe';
+alter table cocktails add column if not exists glass_color text not null default 'gold';
+create table if not exists sales (
+  id uuid primary key,
+  user_id uuid not null references app_users(id) on delete cascade,
+  cocktail_id uuid references cocktails(id) on delete set null,
+  item_name text not null,
+  quantity integer not null check(quantity between 1 and 1000),
+  unit_price integer not null check(unit_price between 0 and 10000000),
+  sold_at timestamptz not null,
+  payment_method text not null check(payment_method in ('cash','card','other')),
+  note text not null default '',
+  stock_deducted boolean not null,
+  request_hash text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists sales_user_date on sales(user_id,sold_at desc);
