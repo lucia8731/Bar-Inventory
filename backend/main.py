@@ -10,7 +10,8 @@ from psycopg.rows import dict_row
 from authlib.integrations.starlette_client import OAuth
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from tools.appearance import SHAPES, COLORS, infer
 from starlette.middleware.sessions import SessionMiddleware
 from tools.generate_catalog import build as build_catalog
 
@@ -33,6 +34,9 @@ async def lifespan(app):
     with db() as conn:
         conn.execute((ROOT / 'backend' / 'schema.sql').read_text(encoding='utf-8'))
         conn.execute(build_catalog(ROOT / 'data' / 'ingredients.csv'))
+        for row in conn.execute('select id, name, category, unit from inventory where container_shape is null or container_color is null').fetchall():
+            shape, color = infer(row['name'], row['category'], row['unit'])
+            conn.execute('update inventory set container_shape=coalesce(container_shape,%s), container_color=coalesce(container_color,%s) where id=%s', (shape, color, row['id']))
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -105,20 +109,36 @@ def state(request: Request):
     with db() as conn:
         return {
             'profile': conn.execute('select display_name from app_users where id=%s', (uid,)).fetchone(),
-            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url from inventory where user_id=%s order by name', (uid,)).fetchall(),
-            'catalog': conn.execute('select id, name, category, unit from catalog order by name').fetchall(),
+            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color from inventory where user_id=%s order by name', (uid,)).fetchall(),
+            'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
             'activity': conn.execute('select id, item_name, unit, change, reason, created_at from stock_events where user_id=%s order by created_at desc, id desc limit 100', (uid,)).fetchall(),
         }
 
-class NewItem(BaseModel):
+class Appearance(BaseModel):
+    container_shape: str | None = None
+    container_color: str | None = None
+
+    @field_validator('container_shape')
+    @classmethod
+    def valid_shape(cls, value):
+        if value is not None and value not in SHAPES: raise ValueError('Invalid container shape')
+        return value
+
+    @field_validator('container_color')
+    @classmethod
+    def valid_color(cls, value):
+        if value is not None and value not in COLORS: raise ValueError('Invalid container color')
+        return value
+
+class NewItem(Appearance):
     name: str = Field(min_length=1, max_length=120)
     category: str = Field(min_length=1, max_length=120)
     unit: str
     quantity: float = Field(default=0, ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(default=0, ge=0, allow_inf_nan=False)
-class Stock(BaseModel):
+class Stock(Appearance):
     quantity: float = Field(ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(ge=0, allow_inf_nan=False)
     target_stock: float = Field(default=0, ge=0, allow_inf_nan=False)
@@ -145,8 +165,9 @@ def trimmed(value: str) -> str:
 def add_item(data: NewItem, request: Request):
     uid = user_id(request)
     if data.unit not in ('ml', 'piece'): raise HTTPException(400, 'Invalid unit')
+    shape, color = infer(data.name, data.category, data.unit)
     with db() as conn:
-        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold) values (%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, data.quantity, data.low_stock_threshold))
+        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, data.quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color))
     return {'ok': True}
 
 @app.patch('/api/inventory/{item_id}')
@@ -157,7 +178,7 @@ def update_item(item_id: UUID, data: Stock, request: Request):
     with db() as conn:
         item = conn.execute('select name, unit, quantity from inventory where id=%s and user_id=%s for update', (item_id, uid)).fetchone()
         if not item: raise HTTPException(404, 'Ingredient not found')
-        conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), item_id, uid))
+        conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s, container_shape=coalesce(%s,container_shape), container_color=coalesce(%s,container_color) where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), data.container_shape, data.container_color, item_id, uid))
         conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) select %s,%s,%s,%s,%s::numeric-%s,%s where %s::numeric <> %s', (uuid4(), uid, item['name'], item['unit'], data.quantity, item['quantity'], 'Stock adjustment', data.quantity, item['quantity']))
     return {'ok': True}
 

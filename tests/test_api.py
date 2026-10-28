@@ -7,6 +7,7 @@ from uuid import uuid4
 from itsdangerous import TimestampSigner
 from fastapi.testclient import TestClient
 from backend.main import app, db, SECRET, ROOT
+from tools.appearance import SHAPES, COLORS
 
 
 def cookie(uid):
@@ -41,6 +42,7 @@ class ApiTests(unittest.TestCase):
         state = c.get('/api/state').json()
         items = {i['name']:i for i in state['inventory']}; cocktail = state['cocktails'][0]['id']
         self.assertGreaterEqual(len(state['catalog']),200)
+        self.assertTrue(all(i['container_shape'] in SHAPES and i['container_color'] in COLORS for i in state['catalog']))
         for name, amount in [('Gin',50),('Vermouth',20)]:
             self.assertEqual(c.post('/api/recipes', json={'cocktail_id':cocktail,'inventory_id':items[name]['id'],'amount':amount}).status_code, 200)
         self.assertEqual(c.post('/api/make', json={'cocktail_id':cocktail,'servings':1}).status_code, 200)
@@ -51,12 +53,20 @@ class ApiTests(unittest.TestCase):
         a_state = c.get('/api/state').json()
         self.assertEqual(len(a_state['activity']), 2)
         self.assertTrue(all(e['reason'].startswith('Made') for e in a_state['activity']))
-        updated = {'quantity': 70, 'low_stock_threshold': 30, 'target_stock': 150, 'supplier': 'Supplier A', 'image_url': 'https://example.com/gin.jpg'}
+        updated = {'quantity': 70, 'low_stock_threshold': 30, 'target_stock': 150, 'supplier': 'Supplier A', 'image_url': 'https://example.com/gin.jpg', 'container_shape':'square', 'container_color':'blue'}
         self.assertEqual(c.patch('/api/inventory/'+items['Gin']['id'], json=updated).status_code, 200)
         a_state = c.get('/api/state').json()
         gin = next(i for i in a_state['inventory'] if i['id'] == items['Gin']['id'])
         self.assertEqual((gin['quantity'],gin['target_stock'],gin['supplier'],gin['image_url']), (70,150,'Supplier A','https://example.com/gin.jpg'))
+        self.assertEqual((gin['container_shape'],gin['container_color']), ('square','blue'))
+        # Old clients that omit appearance must preserve a user's saved choice.
+        self.assertEqual(c.patch('/api/inventory/'+gin['id'], json={'quantity':70,'low_stock_threshold':30}).status_code,200)
+        saved = next(i for i in c.get('/api/state').json()['inventory'] if i['id'] == gin['id'])
+        self.assertEqual((saved['container_shape'],saved['container_color']), ('square','blue'))
         self.assertEqual(len(a_state['activity']), 3)
+        for field in ['container_shape','container_color']:
+            self.assertEqual(c.patch('/api/inventory/'+gin['id'],json={**updated,field:'invalid'}).status_code,422)
+            self.assertEqual(c.post('/api/inventory',json={'name':'Invalid','category':'Other','unit':'ml',field:'invalid'}).status_code,422)
         self.assertEqual(c.patch('/api/inventory/'+items['Gin']['id'], json={**updated,'image_url':'http://example.com/bad'}).status_code, 400)
         c.cookies.clear()
         c.cookies.set('bar_session', cookie(self.b))
@@ -73,6 +83,23 @@ class ApiTests(unittest.TestCase):
         item = result.json()['inventory'][0]
         self.assertEqual((item['name'], item['quantity'], item['target_stock'], item['supplier'], item['image_url']), ('Existing stock', 321, 0, '', ''))
         self.assertEqual(result.json()['activity'], [])
+        self.assertEqual((item['container_shape'],item['container_color']), ('tall','green'))
+        with db() as conn:
+            conn.execute('update inventory set container_shape=%s,container_color=%s where id=%s', ('can','rose',self.existing_item))
+        # A second application startup must not reset chosen appearances.
+        with TestClient(app): pass
+        saved = self.client.get('/api/state').json()['inventory'][0]
+        self.assertEqual((saved['quantity'],saved['container_shape'],saved['container_color']), (321,'can','rose'))
+
+    def test_new_item_appearance(self):
+        c = self.client
+        c.cookies.clear()
+        c.cookies.set('bar_session', cookie(self.b))
+        payload = {'name':'Custom case','category':'Other','unit':'piece','container_shape':'crate','container_color':'lemon'}
+        self.assertEqual(c.post('/api/inventory',json=payload).status_code,200)
+        saved = next(i for i in c.get('/api/state').json()['inventory'] if i['name'] == 'Custom case')
+        self.assertEqual((saved['container_shape'],saved['container_color']), ('crate','lemon'))
+        self.assertEqual(c.delete('/api/inventory/'+saved['id']).status_code,200)
 
     def test_requires_auth_and_origin(self):
         c = self.client

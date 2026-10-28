@@ -1,0 +1,146 @@
+{
+  "shapes": [
+    {
+      "id": "bottle",
+      "label": "Classic bottle"
+    },
+    {
+      "id": "tall",
+      "label": "Tall bottle"
+    },
+    {
+      "id": "round",
+      "label": "Round bottle"
+    },
+    {
+      "id": "square",
+      "label": "Square bottle"
+    },
+    {
+      "id": "wine",
+      "label": "Wine bottle"
+    },
+    {
+      "id": "dropper",
+      "label": "Bitters bottle"
+    },
+    {
+      "id": "can",
+      "label": "Can"
+    },
+    {
+      "id": "carton",
+      "label": "Carton"
+    },
+    {
+      "id": "jar",
+      "label": "Jar"
+    },
+    {
+      "id": "crate",
+      "label": "Produce / case"
+    }
+  ],
+  "colors": [
+    {
+      "id": "clear",
+      "label": "Clear",
+      "hex": "#e3edf0"
+    },
+    {
+      "id": "white",
+      "label": "White",
+      "hex": "#f4f2e9"
+    },
+    {
+      "id": "cream",
+      "label": "Cream",
+      "hex": "#e9d6ac"
+    },
+    {
+      "id": "lemon",
+      "label": "Lemon",
+      "hex": "#edd26b"
+    },
+    {
+      "id": "gold",
+      "label": "Gold",
+      "hex": "#c5a14e"
+    },
+    {
+      "id": "amber",
+      "label": "Amber",
+      "hex": "#ba7d35"
+    },
+    {
+      "id": "orange",
+      "label": "Orange",
+      "hex": "#df863d"
+    },
+    {
+      "id": "coral",
+      "label": "Coral",
+      "hex": "#d97665"
+    },
+    {
+      "id": "red",
+      "label": "Red",
+      "hex": "#bc4548"
+    },
+    {
+      "id": "burgundy",
+      "label": "Burgundy",
+      "hex": "#763c50"
+    },
+    {
+      "id": "rose",
+      "label": "Rose",
+      "hex": "#dda5b2"
+    },
+    {
+      "id": "lavender",
+      "label": "Lavender",
+      "hex": "#b3a2ce"
+    },
+    {
+      "id": "purple",
+      "label": "Purple",
+      "hex": "#715783"
+    },
+    {
+      "id": "blue",
+      "label": "Blue",
+      "hex": "#527da7"
+    },
+    {
+      "id": "teal",
+      "label": "Teal",
+      "hex": "#4f9997"
+    },
+    {
+      "id": "mint",
+      "label": "Mint",
+      "hex": "#9fc5a9"
+    },
+    {
+      "id": "green",
+      "label": "Green",
+      "hex": "#518263"
+    },
+    {
+      "id": "olive",
+      "label": "Olive",
+      "hex": "#7d8650"
+    },
+    {
+      "id": "brown",
+      "label": "Brown",
+      "hex": "#77533e"
+    },
+    {
+      "id": "charcoal",
+      "label": "Charcoal",
+      "hex": "#42474c"
+    }
+  ]
+}
