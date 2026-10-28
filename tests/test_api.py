@@ -141,6 +141,34 @@ class ApiTests(unittest.TestCase):
         c.cookies.clear()
         self.assertEqual(c.patch(recipe,json={'amount':1}).status_code,401)
 
+    def test_capacity_and_fractional_bottles(self):
+        c=self.client
+        owner=uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)',(owner,str(owner),'bottles@example.test'))
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        payload={'name':'Configured gin','category':'Gin','unit':'ml','bottle_size':700,'bottle_count':1.5,'purchase_price':3500,'container_shape':'tall','container_color':'green'}
+        self.assertEqual(c.post('/api/inventory',json=payload).status_code,200)
+        item=c.get('/api/state').json()['inventory'][0]
+        self.assertEqual((item['quantity'],item['bottle_size'],item['bottle_count'],item['purchase_price']), (1050,700,1.5,3500))
+        self.assertEqual(c.patch('/api/inventory/'+item['id'],json={'quantity':875,'low_stock_threshold':0}).status_code,200)
+        saved=c.get('/api/state').json()['inventory'][0]
+        self.assertEqual((saved['bottle_size'],saved['bottle_count'],saved['purchase_price']), (700,1.25,3500))
+        self.assertEqual(c.post('/api/inventory',json={**payload,'name':'Zero stock','bottle_count':0}).status_code,200)
+        self.assertEqual(c.post('/api/inventory',json={**payload,'name':'Missing capacity','bottle_size':None}).status_code,400)
+        self.assertEqual(c.post('/api/inventory',json={**payload,'name':'Conflicting stock','quantity':10}).status_code,400)
+        for field,value in [('bottle_size',0),('bottle_size',-1),('bottle_count',-0.1),('bottle_size',1000001)]:
+            self.assertEqual(c.post('/api/inventory',json={**payload,field:value}).status_code,422)
+        with TestClient(app): pass
+        saved=next(i for i in c.get('/api/state').json()['inventory'] if i['id']==item['id'])
+        self.assertEqual((saved['quantity'],saved['bottle_size'],saved['bottle_count']), (875,700,1.25))
+        # Existing total-volume clients remain valid and are not assigned a guessed capacity.
+        self.assertEqual(c.post('/api/inventory',json={'name':'Legacy stock','category':'Gin','unit':'ml','quantity':321}).status_code,200)
+        legacy=next(i for i in c.get('/api/state').json()['inventory'] if i['name']=='Legacy stock')
+        self.assertEqual(legacy['quantity'],321)
+        self.assertIsNone(legacy['bottle_size']);self.assertIsNone(legacy['bottle_count'])
+        c.cookies.clear()
+
     def test_stock_and_user_isolation(self):
         c = self.client
         c.cookies.set('bar_session', cookie(self.a))

@@ -82,3 +82,5 @@ create index if not exists sales_user_date on sales(user_id,sold_at desc);
 alter table cocktails add column if not exists price integer check(price between 0 and 10000000);
 
 alter table inventory add column if not exists purchase_price integer check(purchase_price between 0 and 10000000);
+
+alter table inventory add column if not exists bottle_size numeric check(bottle_size > 0);
