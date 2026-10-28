@@ -84,3 +84,7 @@ alter table cocktails add column if not exists price integer check(price between
 alter table inventory add column if not exists purchase_price integer check(purchase_price between 0 and 10000000);
 
 alter table inventory add column if not exists bottle_size numeric check(bottle_size > 0);
+
+alter table app_users add column if not exists bar_name text not null default '';
+alter table app_users add column if not exists bar_logo_data bytea;
+alter table app_users add column if not exists bar_logo_version uuid;

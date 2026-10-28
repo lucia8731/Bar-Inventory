@@ -169,6 +169,46 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(legacy['bottle_size']);self.assertIsNone(legacy['bottle_count'])
         c.cookies.clear()
 
+    def test_bar_identity_and_logo(self):
+        c=self.client
+        owner=uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)',(owner,str(owner),'bar-owner@example.test'))
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Hana','bar_name':'  Hana’s Bar  '}).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['profile']['bar_name'],'Hana’s Bar')
+        # Editing only the personal profile must preserve the bar identity.
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Hanae'}).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['profile']['bar_name'],'Hana’s Bar')
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Hana','bar_name':'x'*101}).status_code,422)
+        source=io.BytesIO();meta=PngImagePlugin.PngInfo();meta.add_text('secret_metadata','stripped')
+        Image.new('RGBA',(320,120),(30,80,90,100)).save(source,format='PNG',pnginfo=meta)
+        self.assertEqual(c.post('/api/profile/bar-logo',content=source.getvalue()).status_code,200)
+        state=c.get('/api/state').json();self.assertTrue(state['profile']['bar_logo_version'])
+        self.assertIsNone(state['profile']['avatar_version'])
+        logo=c.get('/api/profile/bar-logo')
+        self.assertEqual(logo.status_code,200);self.assertEqual(logo.headers['content-type'],'image/png')
+        with Image.open(io.BytesIO(logo.content)) as saved:
+            self.assertEqual(saved.size,(320,120));self.assertEqual(saved.mode,'RGBA')
+            self.assertEqual(saved.getpixel((0,0))[3],100)
+            self.assertNotIn('secret_metadata',saved.info)
+        self.assertEqual(c.post('/api/profile/bar-logo',content=b'<svg></svg>').status_code,400)
+        self.assertEqual(c.get('/api/profile/bar-logo').content,logo.content)
+        with TestClient(app): pass
+        self.assertEqual(c.get('/api/state').json()['profile']['bar_name'],'Hana’s Bar')
+        self.assertEqual(c.get('/api/profile/bar-logo').content,logo.content)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(self.b))
+        self.assertEqual(c.get('/api/profile/bar-logo').status_code,404)
+        self.assertEqual(c.get('/api/state').json()['profile']['bar_name'],'')
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.delete('/api/profile/bar-logo').status_code,200)
+        self.assertEqual(c.get('/api/profile/bar-logo').status_code,404)
+        self.assertIsNone(c.get('/api/state').json()['profile']['bar_logo_version'])
+        self.assertEqual(c.get('/api/state').json()['profile']['bar_name'],'Hana’s Bar')
+        c.cookies.clear()
+        self.assertEqual(c.get('/api/profile/bar-logo').status_code,401)
+        self.assertEqual(c.post('/api/profile/bar-logo',content=source.getvalue()).status_code,401)
+
     def test_stock_and_user_isolation(self):
         c = self.client
         c.cookies.set('bar_session', cookie(self.a))
