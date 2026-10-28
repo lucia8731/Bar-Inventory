@@ -8,6 +8,7 @@ const symbols: Record<string, ReactNode> = {
   shopping: <><path d="M5 8h14l2 13H3ZM8 8V6a4 4 0 0 1 8 0v2"/><path d="M8 11v1M16 11v1"/></>,
   activity: <><path d="M3 12h4l3-8 4 16 3-8h4"/></>,
   profile: <><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></>,
+  settings: <><path d="m9 3-1 3-3 1-2 4 2 2v4l4 2 3-1 3 1 4-2v-4l2-2-2-4-3-1-1-3Z"/><circle cx="12" cy="11" r="3"/></>,
   logout: <><path d="M10 3H5v18h5M10 12h11m-4-4 4 4-4 4"/></>,
   panel: <><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M5.5 8h1M5.5 11h1"/></>,
 };

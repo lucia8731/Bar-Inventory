@@ -1,5 +1,7 @@
 """Integration tests run with a disposable PostgreSQL database in CI."""
 import base64
+import io
+from PIL import Image, PngImagePlugin
 import json
 import os
 import unittest
@@ -100,6 +102,44 @@ class ApiTests(unittest.TestCase):
         saved = next(i for i in c.get('/api/state').json()['inventory'] if i['name'] == 'Custom case')
         self.assertEqual((saved['container_shape'],saved['container_color']), ('crate','lemon'))
         self.assertEqual(c.delete('/api/inventory/'+saved['id']).status_code,200)
+
+    def test_profile_photos(self):
+        c = self.client
+        c.cookies.clear()
+        c.cookies.set('bar_session', cookie(self.a))
+        metadata = PngImagePlugin.PngInfo()
+        metadata.add_text('private_metadata','must be stripped')
+        source = io.BytesIO()
+        Image.new('RGBA',(400,300),(100,160,100,128)).save(source,format='PNG',pnginfo=metadata)
+        self.assertEqual(c.post('/api/profile/photo',content=source.getvalue(),headers={'Content-Type':'image/png'}).status_code,200)
+        version = c.get('/api/state').json()['profile']['avatar_version']
+        self.assertTrue(version)
+        photo = c.get('/api/profile/photo')
+        self.assertEqual(photo.status_code,200)
+        self.assertEqual(photo.headers['content-type'],'image/jpeg')
+        self.assertIn('no-store',photo.headers['cache-control'])
+        with Image.open(io.BytesIO(photo.content)) as saved:
+            self.assertEqual(saved.size,(256,256))
+            self.assertEqual(saved.format,'JPEG')
+            self.assertNotIn('private_metadata',saved.info)
+        with TestClient(app): pass
+        self.assertEqual(c.get('/api/profile/photo').content,photo.content)
+        self.assertEqual(c.post('/api/profile/photo',content=b'<svg></svg>').status_code,400)
+        self.assertEqual(c.post('/api/profile/photo',content=b'x'*(5*1024*1024+1)).status_code,413)
+        self.assertEqual(c.get('/api/profile/photo').content,photo.content)
+        c.cookies.clear()
+        c.cookies.set('bar_session',cookie(self.b))
+        self.assertEqual(c.get('/api/profile/photo').status_code,404)
+        self.assertEqual(c.delete('/api/profile/photo').status_code,200)
+        c.cookies.clear()
+        c.cookies.set('bar_session',cookie(self.a))
+        self.assertEqual(c.get('/api/profile/photo').content,photo.content)
+        self.assertEqual(c.delete('/api/profile/photo').status_code,200)
+        self.assertEqual(c.get('/api/profile/photo').status_code,404)
+        self.assertIsNone(c.get('/api/state').json()['profile']['avatar_version'])
+        c.cookies.clear()
+        self.assertEqual(c.get('/api/profile/photo').status_code,401)
+        self.assertEqual(c.post('/api/profile/photo',content=source.getvalue()).status_code,401)
 
     def test_requires_auth_and_origin(self):
         c = self.client

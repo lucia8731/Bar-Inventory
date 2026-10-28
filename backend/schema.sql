@@ -56,3 +56,7 @@ alter table catalog add column if not exists container_shape text;
 alter table catalog add column if not exists container_color text;
 alter table inventory add column if not exists container_shape text;
 alter table inventory add column if not exists container_color text;
+
+-- Small profile photos persist with the user's database record.
+alter table app_users add column if not exists avatar_data bytea;
+alter table app_users add column if not exists avatar_version uuid;
