@@ -1,84 +1,282 @@
 name,category,unit,container_shape,container_color
-London Dry Gin,Gin,ml,tall,green
-Old Tom Gin,Gin,ml,tall,green
+Beefeater London Dry Gin,Gin,ml,tall,clear
+Beefeater 24,Gin,ml,tall,clear
+Bombay Sapphire,Gin,ml,tall,blue
+Bombay Original London Dry Gin,Gin,ml,tall,clear
+Bombay Sapphire Premier Cru Murcian Lemon,Gin,ml,tall,blue
+Tanqueray London Dry Gin,Gin,ml,tall,green
+Tanqueray No. TEN,Gin,ml,tall,green
+Tanqueray Rangpur,Gin,ml,tall,green
+Gordon's London Dry Gin,Gin,ml,tall,green
+Gordon's Premium Pink,Gin,ml,tall,rose
+Hendrick's Gin,Gin,ml,round,brown
+Hendrick's Neptunia,Gin,ml,round,brown
+Roku Japanese Craft Gin,Gin,ml,tall,green
+Sipsmith London Dry Gin,Gin,ml,tall,clear
+Sipsmith V.J.O.P.,Gin,ml,tall,clear
 Plymouth Gin,Gin,ml,tall,green
-Navy Strength Gin,Gin,ml,tall,green
-Sloe Gin,Gin,ml,tall,green
-Japanese Gin,Gin,ml,tall,green
-Botanical Gin,Gin,ml,tall,green
-Geneva Gin,Gin,ml,tall,green
-Pink Gin,Gin,ml,tall,rose
-Barrel-Aged Gin,Gin,ml,tall,green
-Plain Vodka,Vodka,ml,tall,clear
-Citrus Vodka,Vodka,ml,tall,clear
-Vanilla Vodka,Vodka,ml,tall,clear
-Black Pepper Vodka,Vodka,ml,tall,clear
-Rye Vodka,Vodka,ml,tall,clear
-Wheat Vodka,Vodka,ml,tall,clear
-Potato Vodka,Vodka,ml,tall,clear
-Rice Vodka,Vodka,ml,tall,clear
-Grape Vodka,Vodka,ml,tall,clear
-Honey Vodka,Vodka,ml,tall,clear
-White Rum,Rum,ml,bottle,clear
-Gold Rum,Rum,ml,bottle,amber
-Dark Rum,Rum,ml,bottle,brown
-Aged Rum,Rum,ml,bottle,amber
-Overproof Rum,Rum,ml,bottle,clear
-Demerara Rum,Rum,ml,bottle,amber
-Jamaican Rum,Rum,ml,bottle,clear
-Agricole Blanc,Rum,ml,bottle,clear
-Agricole Vieux,Rum,ml,bottle,amber
-Spiced Rum,Rum,ml,bottle,amber
-Coconut Rum,Rum,ml,bottle,cream
-Black Rum,Rum,ml,bottle,brown
-Tequila Blanco,Tequila & Agave,ml,round,clear
-Tequila Reposado,Tequila & Agave,ml,round,amber
-Tequila Añejo,Tequila & Agave,ml,round,amber
-Tequila Extra Añejo,Tequila & Agave,ml,round,amber
-Tequila Cristalino,Tequila & Agave,ml,round,clear
-Mezcal Espadín,Tequila & Agave,ml,round,clear
-Mezcal Tobalá,Tequila & Agave,ml,round,clear
-Mezcal Tepeztate,Tequila & Agave,ml,round,clear
-Sotol,Tequila & Agave,ml,round,clear
-Raicilla,Tequila & Agave,ml,round,clear
-Bacanora,Tequila & Agave,ml,round,clear
-Pulque,Tequila & Agave,ml,round,clear
-Bourbon,Whisky,ml,square,amber
-Rye Whiskey,Whisky,ml,square,amber
-Tennessee Whiskey,Whisky,ml,square,amber
-Blended Scotch,Whisky,ml,square,amber
-Single Malt Scotch,Whisky,ml,square,amber
-Irish Whiskey,Whisky,ml,square,amber
-Japanese Whisky,Whisky,ml,square,amber
-Canadian Whisky,Whisky,ml,square,amber
-Corn Whiskey,Whisky,ml,square,amber
-Wheat Whiskey,Whisky,ml,square,amber
-Peated Whisky,Whisky,ml,square,amber
-Blended Malt Whisky,Whisky,ml,square,amber
-Cognac VS,Brandy,ml,round,amber
-Cognac VSOP,Brandy,ml,round,amber
-Cognac XO,Brandy,ml,round,amber
-Armagnac,Brandy,ml,round,amber
-Calvados,Brandy,ml,round,amber
-Apple Brandy,Brandy,ml,round,amber
-Pisco,Brandy,ml,round,amber
-Grappa,Brandy,ml,round,amber
-Eau de Vie,Brandy,ml,round,amber
-Kirsch,Brandy,ml,round,amber
-Pear Brandy,Brandy,ml,round,amber
-Brandy de Jerez,Brandy,ml,round,amber
-Cachaça,Other Spirits,ml,bottle,clear
-Aquavit,Other Spirits,ml,bottle,clear
-Absinthe,Other Spirits,ml,bottle,green
-Shochu,Other Spirits,ml,bottle,clear
-Awamori,Other Spirits,ml,bottle,clear
-Baijiu,Other Spirits,ml,bottle,clear
-Soju,Other Spirits,ml,bottle,clear
-Arak,Other Spirits,ml,bottle,clear
-Ouzo,Other Spirits,ml,bottle,clear
-Raki,Other Spirits,ml,bottle,clear
-Poitín,Other Spirits,ml,bottle,clear
-Aguardiente,Other Spirits,ml,bottle,clear
+Plymouth Navy Strength Gin,Gin,ml,tall,green
+The Botanist Islay Dry Gin,Gin,ml,tall,clear
+Monkey 47 Schwarzwald Dry Gin,Gin,ml,round,brown
+Nikka Coffey Gin,Gin,ml,tall,clear
+Ki No Bi Kyoto Dry Gin,Gin,ml,tall,clear
+Ki No Bi Sei Kyoto Dry Gin,Gin,ml,tall,clear
+Malfy Originale,Gin,ml,tall,clear
+Malfy Con Limone,Gin,ml,tall,clear
+Citadelle Original Gin,Gin,ml,tall,clear
+Citadelle Jardin d'Été,Gin,ml,tall,clear
+Gin Mare Mediterranean Gin,Gin,ml,round,blue
+Martin Miller's Original Gin,Gin,ml,tall,clear
+Brockmans Intensely Smooth Gin,Gin,ml,round,brown
+Hayman's London Dry Gin,Gin,ml,tall,clear
+Hayman's Old Tom Gin,Gin,ml,tall,clear
+No. 3 London Dry Gin,Gin,ml,tall,green
+Fords London Dry Gin,Gin,ml,tall,clear
+Aviation American Gin,Gin,ml,tall,clear
+Silent Pool Gin,Gin,ml,tall,clear
+Absolut Original,Vodka,ml,tall,clear
+Absolut Citron,Vodka,ml,tall,clear
+Absolut Vanilia,Vodka,ml,tall,clear
+Absolut Elyx,Vodka,ml,tall,clear
+Grey Goose Original,Vodka,ml,tall,clear
+Grey Goose La Poire,Vodka,ml,tall,clear
+Belvedere Organic Vodka,Vodka,ml,tall,clear
+Ketel One Vodka,Vodka,ml,tall,clear
+Ketel One Citroen,Vodka,ml,tall,clear
+Smirnoff No. 21,Vodka,ml,tall,clear
+Smirnoff 100 Proof,Vodka,ml,tall,clear
+Cîroc Vodka,Vodka,ml,tall,clear
+Cîroc Red Berry,Vodka,ml,tall,clear
+Tito's Handmade Vodka,Vodka,ml,tall,clear
+Haku Japanese Craft Vodka,Vodka,ml,tall,clear
+Nikka Coffey Vodka,Vodka,ml,tall,clear
+Stolichnaya Premium Vodka,Vodka,ml,tall,clear
+Stolichnaya Elit,Vodka,ml,tall,clear
+Finlandia Classic Vodka,Vodka,ml,tall,clear
+Finlandia Grapefruit Vodka,Vodka,ml,tall,coral
+Russian Standard Original,Vodka,ml,tall,clear
+Russian Standard Platinum,Vodka,ml,tall,clear
+Chopin Potato Vodka,Vodka,ml,tall,clear
+Chopin Rye Vodka,Vodka,ml,tall,clear
+Chopin Wheat Vodka,Vodka,ml,tall,clear
+Reyka Vodka,Vodka,ml,tall,clear
+Żubrówka Bison Grass Vodka,Vodka,ml,tall,clear
+Żubrówka Biała Vodka,Vodka,ml,tall,clear
+Wyborowa Vodka,Vodka,ml,tall,clear
+Crystal Head Original Vodka,Vodka,ml,round,clear
+Crystal Head Aurora Vodka,Vodka,ml,round,clear
+42 Below Pure Vodka,Vodka,ml,tall,clear
+Eristoff Original Vodka,Vodka,ml,tall,clear
+Beluga Noble Vodka,Vodka,ml,tall,clear
+Chase Original Potato Vodka,Vodka,ml,tall,clear
+Bacardí Carta Blanca,Rum,ml,bottle,clear
+Bacardí Carta Oro,Rum,ml,bottle,amber
+Bacardí Carta Negra,Rum,ml,bottle,brown
+Bacardí Reserva Ocho,Rum,ml,bottle,amber
+Bacardí Gran Reserva Diez,Rum,ml,bottle,amber
+Havana Club Añejo 3 Años,Rum,ml,bottle,clear
+Havana Club Añejo Especial,Rum,ml,bottle,amber
+Havana Club Añejo 7 Años,Rum,ml,bottle,amber
+Appleton Estate Signature,Rum,ml,bottle,amber
+Appleton Estate 8 Year Old Reserve,Rum,ml,bottle,amber
+Appleton Estate 12 Year Old Rare Casks,Rum,ml,bottle,amber
+Mount Gay Eclipse,Rum,ml,bottle,amber
+Mount Gay Black Barrel,Rum,ml,bottle,brown
+Mount Gay XO,Rum,ml,bottle,amber
+Goslings Black Seal Rum,Rum,ml,bottle,brown
+Myers's Original Dark Rum,Rum,ml,bottle,brown
+Captain Morgan Original Spiced Gold,Rum,ml,bottle,amber
+Captain Morgan Dark Rum,Rum,ml,bottle,brown
+Diplomático Reserva Exclusiva,Rum,ml,bottle,brown
+Diplomático Mantuano,Rum,ml,bottle,amber
+Ron Zacapa Centenario 23,Rum,ml,bottle,brown
+Ron Zacapa XO,Rum,ml,bottle,brown
+El Dorado 3 Year Old,Rum,ml,bottle,clear
+El Dorado 8 Year Old,Rum,ml,bottle,amber
+El Dorado 12 Year Old,Rum,ml,bottle,amber
+El Dorado 15 Year Old,Rum,ml,bottle,brown
+Flor de Caña 4 Extra Seco,Rum,ml,bottle,clear
+Flor de Caña 7 Gran Reserva,Rum,ml,bottle,amber
+Flor de Caña 12,Rum,ml,bottle,amber
+Santa Teresa 1796,Rum,ml,bottle,amber
+Planteray 3 Stars,Rum,ml,bottle,clear
+Planteray Original Dark,Rum,ml,bottle,brown
+Planteray Xaymaca Special Dry,Rum,ml,bottle,amber
+Planteray XO 20th Anniversary,Rum,ml,bottle,amber
+Smith & Cross Traditional Jamaica Rum,Rum,ml,bottle,amber
+Wray & Nephew White Overproof Rum,Rum,ml,bottle,clear
+Rhum J.M Blanc 50°,Rum,ml,bottle,clear
+Clément VSOP Rhum Vieux Agricole,Rum,ml,bottle,amber
+Neisson Le Rhum Blanc,Rum,ml,bottle,clear
+Pusser's Blue Label Rum,Rum,ml,bottle,amber
+Patrón Silver,Tequila & Agave,ml,round,clear
+Patrón Reposado,Tequila & Agave,ml,round,amber
+Patrón Añejo,Tequila & Agave,ml,round,amber
+Don Julio Blanco,Tequila & Agave,ml,round,clear
+Don Julio Reposado,Tequila & Agave,ml,round,amber
+Don Julio Añejo,Tequila & Agave,ml,round,amber
+Don Julio 1942,Tequila & Agave,ml,round,clear
+Casamigos Blanco,Tequila & Agave,ml,round,clear
+Casamigos Reposado,Tequila & Agave,ml,round,amber
+Casamigos Añejo,Tequila & Agave,ml,round,amber
+Espolòn Blanco,Tequila & Agave,ml,round,clear
+Espolòn Reposado,Tequila & Agave,ml,round,amber
+Espolòn Añejo,Tequila & Agave,ml,round,amber
+Olmeca Altos Plata,Tequila & Agave,ml,round,clear
+Olmeca Altos Reposado,Tequila & Agave,ml,round,amber
+El Jimador Blanco,Tequila & Agave,ml,round,clear
+El Jimador Reposado,Tequila & Agave,ml,round,amber
+Herradura Silver,Tequila & Agave,ml,round,clear
+Herradura Reposado,Tequila & Agave,ml,round,amber
+Herradura Añejo,Tequila & Agave,ml,round,amber
+1800 Silver,Tequila & Agave,ml,round,clear
+1800 Reposado,Tequila & Agave,ml,round,amber
+1800 Añejo,Tequila & Agave,ml,round,amber
+Jose Cuervo Especial Silver,Tequila & Agave,ml,round,clear
+Jose Cuervo Especial Reposado,Tequila & Agave,ml,round,amber
+Fortaleza Blanco,Tequila & Agave,ml,round,clear
+Fortaleza Reposado,Tequila & Agave,ml,round,amber
+Fortaleza Añejo,Tequila & Agave,ml,round,amber
+Ocho Plata,Tequila & Agave,ml,round,clear
+El Tesoro Blanco,Tequila & Agave,ml,round,clear
+El Tesoro Reposado,Tequila & Agave,ml,round,amber
+Siete Leguas Blanco,Tequila & Agave,ml,round,clear
+Teremana Blanco,Tequila & Agave,ml,round,clear
+Teremana Reposado,Tequila & Agave,ml,round,amber
+Clase Azul Reposado,Tequila & Agave,ml,tall,cream
+Del Maguey Vida Clásico,Tequila & Agave,ml,round,clear
+Del Maguey Chichicapa,Tequila & Agave,ml,round,clear
+Montelobos Espadín,Tequila & Agave,ml,round,clear
+Ilegal Mezcal Joven,Tequila & Agave,ml,round,clear
+Los Siete Misterios Doba-Yej,Tequila & Agave,ml,round,clear
+Hibiki Japanese Harmony,Whisky,ml,square,amber
+Yamazaki 12 Year Old,Whisky,ml,square,amber
+Hakushu 12 Year Old,Whisky,ml,square,amber
+Suntory Whisky Toki,Whisky,ml,square,amber
+Suntory Whisky Kakubin,Whisky,ml,square,amber
+Nikka From the Barrel,Whisky,ml,square,amber
+Nikka Coffey Grain,Whisky,ml,square,amber
+Nikka Coffey Malt,Whisky,ml,square,amber
+Nikka Yoichi Single Malt,Whisky,ml,square,amber
+Nikka Miyagikyo Single Malt,Whisky,ml,square,amber
+The Chita Single Grain,Whisky,ml,square,amber
+Johnnie Walker Black Label,Whisky,ml,square,amber
+Johnnie Walker Red Label,Whisky,ml,square,amber
+Johnnie Walker Blue Label,Whisky,ml,square,amber
+Chivas Regal 12 Year Old,Whisky,ml,square,amber
+Dewar's White Label,Whisky,ml,square,amber
+Ballantine's Finest,Whisky,ml,square,amber
+Monkey Shoulder,Whisky,ml,square,amber
+The Glenlivet 12 Year Old,Whisky,ml,square,amber
+Glenfiddich 12 Year Old,Whisky,ml,square,amber
+The Macallan Double Cask 12 Years Old,Whisky,ml,square,amber
+Glenmorangie The Original 12 Years Old,Whisky,ml,square,amber
+Laphroaig 10 Year Old,Whisky,ml,square,amber
+Ardbeg Ten,Whisky,ml,square,amber
+Lagavulin 16 Year Old,Whisky,ml,square,amber
+Talisker 10 Year Old,Whisky,ml,square,amber
+Bowmore 12 Year Old,Whisky,ml,square,amber
+Highland Park 12 Year Old,Whisky,ml,square,amber
+Jameson Original,Whisky,ml,square,amber
+Jameson Black Barrel,Whisky,ml,square,amber
+Bushmills Original,Whisky,ml,square,amber
+Redbreast 12 Year Old,Whisky,ml,square,amber
+Teeling Small Batch,Whisky,ml,square,amber
+Jack Daniel's Old No. 7,Whisky,ml,square,amber
+Jack Daniel's Single Barrel Select,Whisky,ml,square,amber
+Jim Beam White Label,Whisky,ml,square,amber
+Maker's Mark Kentucky Straight Bourbon,Whisky,ml,square,amber
+Wild Turkey 101 Bourbon,Whisky,ml,square,amber
+Wild Turkey 101 Rye,Whisky,ml,square,amber
+Buffalo Trace Kentucky Straight Bourbon,Whisky,ml,square,amber
+Woodford Reserve Distiller's Select,Whisky,ml,square,amber
+Four Roses Small Batch,Whisky,ml,square,rose
+Bulleit Bourbon,Whisky,ml,square,amber
+Bulleit Rye,Whisky,ml,square,amber
+Rittenhouse Straight Rye Bottled-in-Bond,Whisky,ml,square,amber
+Michter's US*1 Kentucky Straight Bourbon,Whisky,ml,square,amber
+Knob Creek 9 Year Old Bourbon,Whisky,ml,square,amber
+Crown Royal Deluxe,Whisky,ml,square,amber
+Canadian Club Original 1858,Whisky,ml,square,amber
+Amrut Indian Single Malt,Whisky,ml,square,amber
+Hennessy V.S,Brandy,ml,round,amber
+Hennessy V.S.O.P,Brandy,ml,round,amber
+Hennessy X.O,Brandy,ml,round,amber
+Rémy Martin VSOP,Brandy,ml,round,amber
+Rémy Martin 1738 Accord Royal,Brandy,ml,round,amber
+Rémy Martin XO,Brandy,ml,round,amber
+Courvoisier VS,Brandy,ml,round,amber
+Courvoisier VSOP,Brandy,ml,round,amber
+Courvoisier XO,Brandy,ml,round,amber
+Martell VS,Brandy,ml,round,amber
+Martell VSOP,Brandy,ml,round,amber
+Martell Cordon Bleu,Brandy,ml,round,amber
+Camus VSOP Intensely Aromatic,Brandy,ml,round,amber
+Camus XO Intensely Aromatic,Brandy,ml,round,amber
+Pierre Ferrand 1840 Original Formula,Brandy,ml,round,amber
+Ferrand 10 Générations,Brandy,ml,round,amber
+Hine Rare VSOP,Brandy,ml,round,amber
+Hine Antique XO,Brandy,ml,round,amber
+Delamain Pale & Dry XO,Brandy,ml,round,amber
+Château de Laubade VSOP,Brandy,ml,round,amber
+Château de Laubade XO,Brandy,ml,round,amber
+Janneau VSOP Grand Armagnac,Brandy,ml,round,amber
+Boulard VSOP Calvados,Brandy,ml,round,amber
+Boulard XO Calvados,Brandy,ml,round,amber
+Père Magloire VSOP Calvados,Brandy,ml,round,amber
+Christian Drouin Calvados Sélection,Brandy,ml,round,amber
+Laird's Applejack,Brandy,ml,round,amber
+Laird's Straight Apple Brandy Bottled in Bond,Brandy,ml,round,amber
+Torres 10 Gran Reserva,Brandy,ml,round,amber
+Torres 20 Hors d'Age,Brandy,ml,round,amber
+St-Rémy VSOP,Brandy,ml,round,amber
+St-Rémy XO,Brandy,ml,round,amber
+Lepanto Solera Gran Reserva,Brandy,ml,round,amber
+Metaxa 7 Stars,Brandy,ml,round,amber
+Barsol Quebranta Pisco,Brandy,ml,tall,clear
+El Gobernador Pisco,Brandy,ml,tall,clear
+Capel Pisco Reservado Transparente,Brandy,ml,tall,clear
+Nonino Grappa il Moscato,Brandy,ml,tall,clear
+Poli Sarpa di Poli,Brandy,ml,tall,clear
+G.E. Massenez Kirsch Vieux,Brandy,ml,tall,clear
+Leblon Cachaça,Other Spirits,ml,bottle,clear
+Novo Fogo Silver Cachaça,Other Spirits,ml,bottle,clear
+Novo Fogo Barrel-Aged Cachaça,Other Spirits,ml,bottle,amber
+Avuá Prata Cachaça,Other Spirits,ml,bottle,clear
+Avuá Amburana Cachaça,Other Spirits,ml,bottle,amber
+Sagatiba Pura Cachaça,Other Spirits,ml,bottle,clear
+Ypióca Prata Cachaça,Other Spirits,ml,bottle,clear
+Linie Original Aquavit,Other Spirits,ml,bottle,clear
+Aalborg Taffel Akvavit,Other Spirits,ml,bottle,clear
+Aalborg Jubilaeums Akvavit,Other Spirits,ml,bottle,clear
+O.P. Anderson Original Aquavit,Other Spirits,ml,bottle,clear
+Pernod Absinthe,Other Spirits,ml,bottle,green
+La Fée Parisienne Absinthe Supérieure,Other Spirits,ml,bottle,green
+Kübler Absinthe,Other Spirits,ml,bottle,green
+St. George Absinthe Verte,Other Spirits,ml,bottle,green
+Lucid Absinthe Supérieure,Other Spirits,ml,bottle,green
+Iichiko Silhouette,Other Spirits,ml,bottle,clear
+Iichiko Saiten,Other Spirits,ml,bottle,clear
+Kuro Kirishima,Other Spirits,ml,bottle,brown
+Aka Kirishima,Other Spirits,ml,bottle,brown
+Naka Naka Barley Shochu,Other Spirits,ml,bottle,brown
+Torikai Rice Shochu,Other Spirits,ml,bottle,brown
+Zanpa White Awamori,Other Spirits,ml,bottle,clear
+Kumesen Kumejima's Kumesen Brown,Other Spirits,ml,bottle,brown
+Hakkaisan Yoroshiku Senman Arubeshi Kome Shochu,Other Spirits,ml,bottle,clear
+Jinro Chamisul Fresh,Other Spirits,ml,bottle,green
+Jinro Is Back,Other Spirits,ml,bottle,green
+Chum Churum Original,Other Spirits,ml,bottle,green
+Kweichow Moutai Flying Fairy,Other Spirits,ml,bottle,cream
+Luzhou Laojiao Zisha Daqu,Other Spirits,ml,round,brown
+Ming River Sichuan Baijiu,Other Spirits,ml,bottle,clear
+Ouzo 12,Other Spirits,ml,bottle,clear
+Plomari Ouzo,Other Spirits,ml,bottle,clear
+Yeni Rakı,Other Spirits,ml,bottle,clear
+Arak Brun,Other Spirits,ml,bottle,clear
+Arak Touma,Other Spirits,ml,bottle,clear
+Bán Poitín,Other Spirits,ml,bottle,clear
+Antioqueño Aguardiente Sin Azúcar,Other Spirits,ml,bottle,clear
 Cointreau,Orange Liqueur,ml,square,amber
 Grand Marnier,Orange Liqueur,ml,round,brown
 Triple Sec,Orange Liqueur,ml,bottle,gold
