@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api, type Session } from '@/lib/api';
+import { NavIcon } from '@/components/NavIcon';
 import { ContainerIcon, AppearancePicker, type Appearance } from '@/components/ContainerIcon';
 
 type Item = Appearance & { id: string; name: string; category: string; unit: string; quantity: number; low_stock_threshold: number; target_stock: number; supplier: string; image_url: string };
@@ -16,6 +17,28 @@ export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [page, setPage] = useState<Page>('overview');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarToggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('bar-sidebar-open');
+      setSidebarOpen(saved === null ? window.matchMedia('(min-width: 761px)').matches : saved === 'true');
+    } catch { setSidebarOpen(window.matchMedia('(min-width: 761px)').matches); }
+  }, []);
+  function toggleSidebar() {
+    const next = !sidebarOpen;
+    setSidebarOpen(next);
+    try { localStorage.setItem('bar-sidebar-open', String(next)); } catch { /* Storage may be disabled. */ }
+  }
+  function closeSidebar() { setSidebarOpen(false); try { localStorage.setItem('bar-sidebar-open', 'false'); } catch { /* Storage may be disabled. */ } sidebarToggle.current?.focus(); }
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    function escape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !document.querySelector('dialog[open]') && window.matchMedia('(max-width: 760px)').matches) closeSidebar();
+    }
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [sidebarOpen]);
   const [items, setItems] = useState<Item[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [cocktails, setCocktails] = useState<Cocktail[]>([]);
@@ -51,7 +74,7 @@ export default function Home() {
     catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong.'); }
     finally { setBusy(false); }
   }
-  function navigate(next: Page) { setPage(next); setQuery(''); setCategory('All'); setError(''); setNotice(''); }
+  function navigate(next: Page) { if (window.matchMedia('(max-width: 760px)').matches) closeSidebar(); setPage(next); setQuery(''); setCategory('All'); setError(''); setNotice(''); }
   const filteredItems = useMemo(() => items.filter(i => i.name.toLowerCase().includes(query.toLowerCase()) && (category === 'All' || i.category === category)).sort((a,b) => sort === 'name-desc' ? b.name.localeCompare(a.name) : sort === 'category' ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name)), [items, query, category, sort]);
   const filteredCatalog = useMemo(() => catalog.filter(i => i.name.toLowerCase().includes(query.toLowerCase()) && (category === 'All' || i.category === category)).sort((a,b) => sort === 'name-desc' ? b.name.localeCompare(a.name) : sort === 'category' ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name)), [catalog, query, category, sort]);
   const categories = Array.from(new Set((page === 'catalog' ? catalog : items).map(i => i.category))).sort();
@@ -66,8 +89,18 @@ export default function Home() {
   if (!ready) return <main className="center">Loading…</main>;
   if (!session) return <main className="center"><div className="login panel"><span className="eyebrow">BAR INVENTORY</span><h1>A little more<br />room to pour.</h1><p>Keep track of your ingredients and make the most of your bar.</p><button onClick={() => { window.location.href = '/api/auth/login'; }}>Continue with Google <span>↗</span></button>{error && <p className="error" role="alert">{error}</p>}</div></main>;
 
-  return <div className="shell"><aside><div className="brand"><span className="mark">b.</span><span>bar inventory<small>YOUR BAR, IN ORDER</small></span></div><nav aria-label="Main navigation">{pages.map(([id, label]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}>{label}<span>↗</span></button>)}</nav><div className="aside-footer">A little space for<br />everything behind the bar.</div></aside>
-    <main className="content"><header><div><span className="eyebrow">YOUR BAR / {page.toUpperCase()}</span><h1>{pages.find(p => p[0] === page)?.[1]}</h1></div><div className="account">{session.user.email}</div></header>
+  return <div className="shell">
+    {sidebarOpen && <button className="secondary sidebar-backdrop" aria-label="Close sidebar" onClick={closeSidebar} />}
+    <aside id="bar-sidebar" className="minimal-sidebar" hidden={!sidebarOpen} aria-label="Sidebar">
+      <div className="brand"><span className="mark">b.</span><span>bar inventory</span></div>
+      <nav aria-label="Main navigation">{[
+        { label: 'MAIN MENU', ids: ['overview', 'inventory', 'catalog', 'cocktails'] },
+        { label: 'WORKSPACE', ids: ['shopping', 'activity'] },
+        { label: 'GENERAL', ids: ['profile'] },
+      ].map(group => <div className="nav-group" key={group.label}><p className="nav-group-label">{group.label}</p>{pages.filter(([id]) => group.ids.includes(id)).map(([id,label]) => <button key={id} className={page === id ? 'active' : ''} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><NavIcon name={id} /><span className="nav-label">{label}</span></button>)}</div>)}</nav>
+      <div className="sidebar-bottom"><span className="sidebar-email">{session.user.email}</span><button className="text-button sidebar-logout" onClick={() => void api.signOut().then(() => { setSession(null); setItems([]); setCocktails([]); setIngredients([]); }).catch(e => setError(e.message))}><NavIcon name="logout" />Log out</button></div>
+    </aside>
+    <main className="content"><header><div className="heading-with-toggle"><button ref={sidebarToggle} className="secondary sidebar-toggle" aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={sidebarOpen} aria-controls="bar-sidebar" onClick={toggleSidebar}><NavIcon name="panel" /></button><div><span className="eyebrow">YOUR BAR / {page.toUpperCase()}</span><h1>{pages.find(p => p[0] === page)?.[1]}</h1></div></div><div className="account">{session.user.email}</div></header>
       {error && <div className="message error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
       {notice && <div className="message success" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss message">×</button></div>}
       {page === 'overview' && <><div className="cover" role="img" aria-label="Bottles arranged on a bar shelf" /><div className="intro"><p>Everything in its place.</p><span>A clear view of what you have and what needs a little attention.</span></div><div className="stats"><button onClick={() => navigate('inventory')}><small>IN YOUR INVENTORY</small><strong>{items.length}</strong><span>ingredients ↗</span></button><button onClick={() => navigate('inventory')}><small>LOW OR OUT</small><strong>{low.length}</strong><span>ingredients ↗</span></button><button onClick={() => navigate('cocktails')}><small>YOUR RECIPES</small><strong>{cocktails.length}</strong><span>cocktails ↗</span></button></div><section className="section"><div className="section-title"><div><span className="eyebrow">KEEP AN EYE ON</span><h2>Running low</h2></div><button className="text-button" onClick={() => navigate('shopping')}>Shopping list ↗</button></div>{low.length ? <div className="rows">{low.slice(0, 6).map(i => <div className="row" key={i.id}><div className="item-name"><ContainerIcon {...i} /><div><strong>{i.name}</strong><small>{i.category}</small></div></div><span className="low">{i.quantity} {i.unit}</span></div>)}</div> : <p className="empty">{items.length ? 'Nothing is running low.' : 'Your inventory is empty. Add ingredients to get started.'}</p>}<button className="secondary" onClick={() => navigate('catalog')}>Browse ingredients →</button></section></>}
