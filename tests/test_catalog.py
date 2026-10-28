@@ -1,4 +1,6 @@
 import csv
+import json
+from collections import Counter
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +14,24 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(sql, (ROOT / 'backend' / 'seed.sql').read_text(encoding='utf-8'))
         with (ROOT / 'data' / 'ingredients.csv').open(encoding='utf-8', newline='') as f:
             self.assertGreaterEqual(len(list(csv.DictReader(f))), 200)
-        self.assertIn("('Gin", sql)
+        self.assertIn("('Hibiki Japanese Harmony'", sql)
+
+    def test_spirits_are_specific_and_retired_suggestions_are_removed(self):
+        with (ROOT / 'data/ingredients.csv').open(encoding='utf-8') as source:
+            rows = list(csv.DictReader(source))
+        counts = Counter(row['category'] for row in rows)
+        for category in ('Gin', 'Vodka', 'Rum', 'Tequila & Agave', 'Whisky', 'Brandy', 'Other Spirits'):
+            self.assertGreaterEqual(counts[category], 30, category)
+            self.assertLessEqual(counts[category], 50, category)
+        names = {row['name'] for row in rows}
+        retired = json.loads((ROOT / 'data/retired_catalog_names.json').read_text())
+        self.assertTrue(set(retired).isdisjoint(names))
+        self.assertIn('Japanese Whisky', retired)
+        self.assertIn('Hibiki Japanese Harmony', names)
+        self.assertIn('Plymouth Gin', names)  # A real product, retained with its existing ID.
+        sql = build(ROOT / 'data/ingredients.csv')
+        self.assertIn("delete from catalog where name in (", sql)
+        self.assertNotIn('delete from inventory', sql.lower())
 
     def test_rejects_duplicate_and_invalid_units(self):
         with tempfile.TemporaryDirectory() as temp:

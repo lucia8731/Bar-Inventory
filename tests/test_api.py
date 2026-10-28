@@ -25,6 +25,7 @@ class ApiTests(unittest.TestCase):
         old_schema = (ROOT / 'backend' / 'schema.sql').read_text(encoding='utf-8').split('-- Additive changes')[0]
         with db() as conn:
             conn.execute(old_schema)
+            conn.execute("insert into catalog (name,category,unit) values ('Japanese Whisky','Whisky','ml'),('Plymouth Gin','Gin','ml'),('Private catalog suggestion','Other','ml') on conflict (name) do nothing")
             conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s)', (cls.existing, str(cls.existing), 'existing@example.test'))
             conn.execute('insert into inventory (id,user_id,name,category,unit,quantity) values (%s,%s,%s,%s,%s,%s)', (cls.existing_item, cls.existing, 'Existing stock', 'Gin', 'ml', 321))
         cls.client = TestClient(app, base_url='http://testserver', headers={'Origin': 'http://testserver'})
@@ -32,9 +33,24 @@ class ApiTests(unittest.TestCase):
         cls.a, cls.b = uuid4(), uuid4()
         with db() as conn:
             conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s),(%s,%s,%s)', (cls.a,str(cls.a),'a@example.test',cls.b,str(cls.b),'b@example.test'))
+            # Supply appearance for the custom test-only catalog suggestion.
+            conn.execute("update catalog set container_shape='bottle',container_color='clear' where name='Private catalog suggestion'")
     @classmethod
     def tearDownClass(cls):
         cls.client.__exit__(None,None,None)
+    def test_catalog_upgrade_is_repeatable_and_preserves_existing_data(self):
+        from tools.generate_catalog import build
+        with db() as conn:
+            before = conn.execute('select id,name,category,unit,quantity from inventory where id=%s', (self.existing_item,)).fetchone()
+            names = {row['name']: row['id'] for row in conn.execute('select id,name from catalog').fetchall()}
+            self.assertNotIn('Japanese Whisky', names)
+            self.assertIn('Hibiki Japanese Harmony', names)
+            self.assertIn('Private catalog suggestion', names)
+            conn.execute(build(ROOT / 'data/ingredients.csv'))
+            again = {row['name']: row['id'] for row in conn.execute('select id,name from catalog').fetchall()}
+            self.assertEqual(names, again)
+            self.assertEqual(before, conn.execute('select id,name,category,unit,quantity from inventory where id=%s', (self.existing_item,)).fetchone())
+
     def test_sales_and_glass_styles(self):
         c = self.client
         owner = uuid4()
