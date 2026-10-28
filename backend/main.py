@@ -114,7 +114,7 @@ def state(request: Request):
     uid = user_id(request)
     with db() as conn:
         return {
-            'profile': conn.execute('select display_name, avatar_version from app_users where id=%s', (uid,)).fetchone(),
+            'profile': conn.execute('select display_name, avatar_version, bar_name, bar_logo_version from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color, purchase_price, bottle_size, case when bottle_size is not null then quantity/bottle_size end as bottle_count from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name, glass_shape, glass_color, price from cocktails where user_id=%s order by name', (uid,)).fetchall(),
@@ -207,6 +207,7 @@ class Make(BaseModel):
     cocktail_id: UUID
     servings: int = Field(ge=1, le=1000)
 class Profile(BaseModel):
+    bar_name: str | None = Field(default=None, max_length=100)
     display_name: str = Field(max_length=100)
 
 def trimmed(value: str) -> str:
@@ -320,35 +321,67 @@ def make(data: Make, request: Request):
 @app.put('/api/profile')
 def save_profile(data: Profile, request: Request):
     with db() as conn:
-        conn.execute('update app_users set display_name=%s where id=%s', (data.display_name.strip(), user_id(request)))
+        conn.execute('update app_users set display_name=%s, bar_name=coalesce(%s,bar_name) where id=%s', (data.display_name.strip(), data.bar_name.strip() if data.bar_name is not None else None, user_id(request)))
     return {'ok': True}
 
-@app.post('/api/profile/photo')
-async def upload_profile_photo(request: Request):
-    uid = user_id(request)
+async def normalized_image(request: Request, logo=False):
     payload = bytearray()
     async for chunk in request.stream():
         if len(payload) + len(chunk) > 5 * 1024 * 1024:
-            raise HTTPException(413, 'Choose a photo smaller than 5 MB.')
+            raise HTTPException(413, 'Choose an image smaller than 5 MB.')
         payload.extend(chunk)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(payload)) as source:
                 if source.format not in ('JPEG', 'PNG', 'WEBP'):
-                    raise ValueError('Unsupported photo format')
+                    raise ValueError('Unsupported image format')
                 if source.width * source.height > 12_000_000:
-                    raise ValueError('Photo dimensions are too large')
-                oriented = ImageOps.exif_transpose(source)
-                cropped = ImageOps.fit(oriented.convert('RGBA'), (256, 256), method=Image.Resampling.LANCZOS)
-                photo = Image.new('RGB', (256, 256), 'white')
-                photo.paste(cropped, mask=cropped.getchannel('A'))
+                    raise ValueError('Image dimensions are too large')
+                oriented = ImageOps.exif_transpose(source).convert('RGBA')
                 output = io.BytesIO()
-                photo.save(output, format='JPEG', quality=85, optimize=True)
+                if logo:
+                    oriented.thumbnail((512,512), Image.Resampling.LANCZOS)
+                    # Copy pixels to strip metadata while keeping transparent logo backgrounds.
+                    clean = Image.new('RGBA', oriented.size)
+                    clean.paste(oriented)
+                    clean.save(output,format='PNG',optimize=True)
+                else:
+                    cropped = ImageOps.fit(oriented, (256,256), method=Image.Resampling.LANCZOS)
+                    photo = Image.new('RGB',(256,256),'white')
+                    photo.paste(cropped,mask=cropped.getchannel('A'))
+                    photo.save(output,format='JPEG',quality=85,optimize=True)
+                return output.getvalue()
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise HTTPException(400, 'Choose a JPG, PNG or WebP photo up to 12 megapixels.')
+        raise HTTPException(400, 'Choose a JPG, PNG or WebP image up to 12 megapixels.')
+
+@app.post('/api/profile/photo')
+async def upload_profile_photo(request: Request):
+    uid = user_id(request)
+    photo = await normalized_image(request)
     with db() as conn:
-        conn.execute('update app_users set avatar_data=%s, avatar_version=%s where id=%s', (output.getvalue(), uuid4(), uid))
+        conn.execute('update app_users set avatar_data=%s, avatar_version=%s where id=%s', (photo, uuid4(), uid))
+    return {'ok': True}
+
+@app.post('/api/profile/bar-logo')
+async def upload_bar_logo(request: Request):
+    uid = user_id(request)
+    logo = await normalized_image(request, logo=True)
+    with db() as conn:
+        conn.execute('update app_users set bar_logo_data=%s, bar_logo_version=%s where id=%s', (logo,uuid4(),uid))
+    return {'ok': True}
+
+@app.get('/api/profile/bar-logo')
+def bar_logo(request: Request):
+    with db() as conn:
+        row = conn.execute('select bar_logo_data from app_users where id=%s',(user_id(request),)).fetchone()
+    if not row or row['bar_logo_data'] is None: raise HTTPException(404,'No bar logo yet.')
+    return Response(bytes(row['bar_logo_data']),media_type='image/png',headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+@app.delete('/api/profile/bar-logo')
+def remove_bar_logo(request: Request):
+    with db() as conn:
+        conn.execute('update app_users set bar_logo_data=null,bar_logo_version=null where id=%s',(user_id(request),))
     return {'ok': True}
 
 @app.get('/api/profile/photo')

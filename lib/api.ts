@@ -1,5 +1,5 @@
 export type Session = { user: { id: string; email: string; display_name: string } };
-type State = { profile: { display_name: string; avatar_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
+type State = { profile: { display_name: string; avatar_version: string | null; bar_name: string; bar_logo_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
 async function send(method: string, path: string, body?: object) {
   const response = await fetch(path, { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json();
@@ -7,9 +7,9 @@ async function send(method: string, path: string, body?: object) {
   return data;
 }
 export const api = {
-  async uploadPhoto(file: File): Promise<{ error: { message: string } | null }> {
+  async uploadPhoto(file: File, path: '/api/profile/photo' | '/api/profile/bar-logo' = '/api/profile/photo'): Promise<{ error: { message: string } | null }> {
     try {
-      const response = await fetch('/api/profile/photo', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+      const response = await fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to upload photo.');
       return { error: null };
