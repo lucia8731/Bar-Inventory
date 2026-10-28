@@ -116,7 +116,7 @@ def state(request: Request):
             'profile': conn.execute('select display_name, avatar_version from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
-            'cocktails': conn.execute('select id, name, glass_shape, glass_color from cocktails where user_id=%s order by name', (uid,)).fetchall(),
+            'cocktails': conn.execute('select id, name, glass_shape, glass_color, price from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
             'sales': conn.execute('select id, item_name, quantity, unit_price, sold_at, payment_method, note, stock_deducted from sales where user_id=%s order by sold_at desc, id desc limit 500', (uid,)).fetchall(),
             'sales_summary': conn.execute('select coalesce(sum(quantity * unit_price::bigint),0) as revenue, coalesce(sum(quantity),0) as units, count(*) as entries from sales where user_id=%s', (uid,)).fetchone(),
@@ -157,6 +157,7 @@ GLASSES = {'coupe','martini','rocks','highball','collins','wine','flute','hurric
 class CocktailStyle(Name):
     glass_shape: str = 'coupe'
     glass_color: str = 'gold'
+    price: int | None = Field(default=None, ge=0, le=10000000, strict=True)
     @field_validator('glass_shape')
     @classmethod
     def valid_glass(cls, value):
@@ -234,13 +235,13 @@ def delete_item(item_id: UUID, request: Request):
 
 @app.post('/api/cocktails')
 def add_cocktail(data: CocktailStyle, request: Request):
-    with db() as conn: conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color) values (%s,%s,%s,%s,%s)', (uuid4(), user_id(request), trimmed(data.name), data.glass_shape, data.glass_color))
+    with db() as conn: conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color,price) values (%s,%s,%s,%s,%s,%s)', (uuid4(), user_id(request), trimmed(data.name), data.glass_shape, data.glass_color, data.price))
     return {'ok': True}
 
 @app.patch('/api/cocktails/{cocktail_id}')
 def update_cocktail(cocktail_id: UUID, data: CocktailStyle, request: Request):
     with db() as conn:
-        result = conn.execute('update cocktails set name=%s, glass_shape=%s, glass_color=%s where id=%s and user_id=%s', (trimmed(data.name), data.glass_shape, data.glass_color, cocktail_id, user_id(request)))
+        result = conn.execute('update cocktails set name=%s, glass_shape=%s, glass_color=%s, price=case when %s then %s else price end where id=%s and user_id=%s', (trimmed(data.name), data.glass_shape, data.glass_color, 'price' in data.model_fields_set, data.price, cocktail_id, user_id(request)))
         if not result.rowcount: raise HTTPException(404, 'Cocktail not found')
     return {'ok': True}
 
