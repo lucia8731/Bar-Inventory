@@ -114,7 +114,7 @@ def state(request: Request):
     with db() as conn:
         return {
             'profile': conn.execute('select display_name, avatar_version from app_users where id=%s', (uid,)).fetchone(),
-            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color from inventory where user_id=%s order by name', (uid,)).fetchall(),
+            'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color, purchase_price from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name, glass_shape, glass_color, price from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
@@ -140,12 +140,14 @@ class Appearance(BaseModel):
         return value
 
 class NewItem(Appearance):
+    purchase_price: int | None = Field(default=None, ge=0, le=10000000, strict=True)
     name: str = Field(min_length=1, max_length=120)
     category: str = Field(min_length=1, max_length=120)
     unit: str
     quantity: float = Field(default=0, ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(default=0, ge=0, allow_inf_nan=False)
 class Stock(Appearance):
+    purchase_price: int | None = Field(default=None, ge=0, le=10000000, strict=True)
     quantity: float = Field(ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(ge=0, allow_inf_nan=False)
     target_stock: float = Field(default=0, ge=0, allow_inf_nan=False)
@@ -194,6 +196,9 @@ class Recipe(BaseModel):
     cocktail_id: UUID
     inventory_id: UUID
     amount: float = Field(gt=0, allow_inf_nan=False)
+class RecipeAmount(BaseModel):
+    amount: float = Field(gt=0, allow_inf_nan=False)
+
 class Make(BaseModel):
     cocktail_id: UUID
     servings: int = Field(ge=1, le=1000)
@@ -211,7 +216,7 @@ def add_item(data: NewItem, request: Request):
     if data.unit not in ('ml', 'piece'): raise HTTPException(400, 'Invalid unit')
     shape, color = infer(data.name, data.category, data.unit)
     with db() as conn:
-        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, data.quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color))
+        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color,purchase_price) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, data.quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color, data.purchase_price))
     return {'ok': True}
 
 @app.patch('/api/inventory/{item_id}')
@@ -222,7 +227,7 @@ def update_item(item_id: UUID, data: Stock, request: Request):
     with db() as conn:
         item = conn.execute('select name, unit, quantity from inventory where id=%s and user_id=%s for update', (item_id, uid)).fetchone()
         if not item: raise HTTPException(404, 'Ingredient not found')
-        conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s, container_shape=coalesce(%s,container_shape), container_color=coalesce(%s,container_color) where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), data.container_shape, data.container_color, item_id, uid))
+        conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s, container_shape=coalesce(%s,container_shape), container_color=coalesce(%s,container_color), purchase_price=case when %s then %s else purchase_price end where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), data.container_shape, data.container_color, 'purchase_price' in data.model_fields_set, data.purchase_price, item_id, uid))
         conn.execute('insert into stock_events (id,user_id,item_name,unit,change,reason) select %s,%s,%s,%s,%s::numeric-%s,%s where %s::numeric <> %s', (uuid4(), uid, item['name'], item['unit'], data.quantity, item['quantity'], 'Stock adjustment', data.quantity, item['quantity']))
     return {'ok': True}
 
@@ -262,6 +267,15 @@ def add_recipe(data: Recipe, request: Request):
     with db() as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
         conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount) values (%s,%s,%s,%s)', (uid, data.cocktail_id, data.inventory_id, data.amount))
+    return {'ok': True}
+
+@app.patch('/api/recipes/{cocktail_id}/{item_id}')
+def update_recipe_amount(cocktail_id: UUID, item_id: UUID, data: RecipeAmount, request: Request):
+    uid = user_id(request)
+    with db() as conn:
+        lock_cocktail(conn, uid, cocktail_id)
+        result = conn.execute('update recipe_ingredients set amount=%s where cocktail_id=%s and inventory_id=%s and user_id=%s', (data.amount,cocktail_id,item_id,uid))
+        if not result.rowcount: raise HTTPException(404, 'Recipe ingredient not found')
     return {'ok': True}
 
 @app.delete('/api/recipes/{cocktail_id}/{item_id}')
