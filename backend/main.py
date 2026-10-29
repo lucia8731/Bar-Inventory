@@ -175,6 +175,18 @@ class CocktailStyle(Name):
         if value not in COLORS: raise ValueError('Invalid glass color')
         return value
 
+class RecipeLine(BaseModel):
+    inventory_id: UUID
+    amount: float = Field(gt=0, allow_inf_nan=False)
+class NewCocktail(CocktailStyle):
+    ingredients: list[RecipeLine] = Field(default_factory=list, max_length=100)
+    @field_validator('ingredients')
+    @classmethod
+    def unique_ingredients(cls, value):
+        if len({line.inventory_id for line in value}) != len(value):
+            raise ValueError('Each ingredient can appear only once')
+        return value
+
 class Sale(BaseModel):
     id: UUID
     cocktail_id: UUID | None = None
@@ -249,8 +261,16 @@ def delete_item(item_id: UUID, request: Request):
     return {'ok': True}
 
 @app.post('/api/cocktails')
-def add_cocktail(data: CocktailStyle, request: Request):
-    with db() as conn: conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color,price) values (%s,%s,%s,%s,%s,%s)', (uuid4(), user_id(request), trimmed(data.name), data.glass_shape, data.glass_color, data.price))
+def add_cocktail(data: NewCocktail, request: Request):
+    uid, cid = user_id(request), uuid4()
+    with db() as conn:
+        # Validate and lock only this user's stock, then save the whole recipe atomically.
+        for line in sorted(data.ingredients, key=lambda item: str(item.inventory_id)):
+            if not conn.execute('select id from inventory where id=%s and user_id=%s for key share', (line.inventory_id, uid)).fetchone():
+                raise HTTPException(400, 'Every ingredient must be in your Inventory before adding it to a recipe')
+        conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color,price) values (%s,%s,%s,%s,%s,%s)', (cid, uid, trimmed(data.name), data.glass_shape, data.glass_color, data.price))
+        for line in data.ingredients:
+            conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount) values (%s,%s,%s,%s)', (uid, cid, line.inventory_id, line.amount))
     return {'ok': True}
 
 @app.patch('/api/cocktails/{cocktail_id}')

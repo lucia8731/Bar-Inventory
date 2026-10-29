@@ -51,6 +51,32 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(names, again)
             self.assertEqual(before, conn.execute('select id,name,category,unit,quantity from inventory where id=%s', (self.existing_item,)).fetchone())
 
+    def test_create_complete_recipe_atomically(self):
+        owner, other, foreign = uuid4(), uuid4(), uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users (id,google_sub,email) values (%s,%s,%s),(%s,%s,%s)',(owner,str(owner),'recipe-modal@example.test',other,str(other),'other-modal@example.test'))
+            conn.execute("insert into inventory (id,user_id,name,category,unit,quantity) values (%s,%s,'Foreign ingredient','Gin','ml',100)",(foreign,other))
+        c=self.client;c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        for name in ('Batch gin','Batch lemon'):
+            self.assertEqual(c.post('/api/inventory',json={'name':name,'category':'Gin','unit':'ml','quantity':100}).status_code,200)
+        stock=c.get('/api/state').json()['inventory']
+        lines=[{'inventory_id':item['id'],'amount':30.5} for item in stock]
+        body={'name':'Atomic recipe','price':1500,'glass_shape':'martini','glass_color':'clear','ingredients':lines}
+        self.assertEqual(c.post('/api/cocktails',json=body).status_code,200)
+        state=c.get('/api/state').json()
+        self.assertEqual(len(state['cocktails']),1)
+        self.assertEqual((state['cocktails'][0]['name'],state['cocktails'][0]['price']),('Atomic recipe',1500))
+        self.assertEqual(len(state['ingredients']),2)
+        self.assertTrue(all(float(line['amount'])==30.5 for line in state['ingredients']))
+        self.assertTrue(all(float(item['quantity'])==100 for item in state['inventory']))
+        for invalid,status in [([lines[0],lines[0]],422),([{'inventory_id':foreign,'amount':10}],400),([lines[0],{'inventory_id':str(uuid4()),'amount':10}],400),([{'inventory_id':stock[0]['id'],'amount':0}],422)]:
+            # Convert UUIDs for JSON and verify neither partial cocktails nor ingredients remain.
+            invalid=[{**line,'inventory_id':str(line['inventory_id'])} for line in invalid]
+            self.assertEqual(c.post('/api/cocktails',json={**body,'name':'Invalid recipe','ingredients':invalid}).status_code,status)
+            after=c.get('/api/state').json()
+            self.assertEqual(len(after['cocktails']),1)
+            self.assertEqual(len(after['ingredients']),2)
+
     def test_sales_and_glass_styles(self):
         c = self.client
         owner = uuid4()
