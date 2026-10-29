@@ -379,6 +379,8 @@ def update_recipe_amount(cocktail_id: UUID, item_id: UUID, data: RecipeAmount, r
     uid = user_id(request)
     with db() as conn:
         lock_cocktail(conn, uid, cocktail_id)
+        if not conn.execute('select 1 from recipe_ingredients where cocktail_id=%s and inventory_id=%s and user_id=%s',(cocktail_id,item_id,uid)).fetchone():
+            raise HTTPException(404,'Recipe ingredient not found')
         amount,unit=recipe_quantity(conn,uid,item_id,data)
         result = conn.execute('update recipe_ingredients set amount=%s,amount_unit=%s where cocktail_id=%s and inventory_id=%s and user_id=%s', (amount,unit,cocktail_id,item_id,uid))
         if not result.rowcount: raise HTTPException(404, 'Recipe ingredient not found')
