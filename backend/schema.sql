@@ -97,3 +97,10 @@ create table if not exists sale_batches (
   request_hash text not null,
   created_at timestamptz not null default now()
 );
+
+create table if not exists restock_batches (
+  id uuid primary key,
+  user_id uuid not null references app_users(id) on delete cascade,
+  request_hash text not null,
+  created_at timestamptz not null default now()
+);

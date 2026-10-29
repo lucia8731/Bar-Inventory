@@ -149,6 +149,7 @@ class NewItem(Appearance):
     unit: str
     quantity: float = Field(default=0, ge=0, allow_inf_nan=False)
     low_stock_threshold: float = Field(default=0, ge=0, allow_inf_nan=False)
+    target_stock: float = Field(default=0, ge=0, allow_inf_nan=False)
 class Stock(Appearance):
     bottle_size: float | None = Field(default=None, gt=0, le=1000000, allow_inf_nan=False)
     purchase_price: int | None = Field(default=None, ge=0, le=10000000, strict=True)
@@ -252,8 +253,43 @@ def add_item(data: NewItem, request: Request):
         if 'quantity' in data.model_fields_set: raise HTTPException(400, 'Use either total stock or bottle count, not both.')
         quantity = Decimal(str(data.bottle_count)) * Decimal(str(data.bottle_size))
     with db() as conn:
-        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color,purchase_price,bottle_size) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color, data.purchase_price, data.bottle_size))
+        conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color,purchase_price,bottle_size,target_stock) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color, data.purchase_price, data.bottle_size, data.target_stock))
     return {'ok': True}
+
+class RestockLine(BaseModel):
+    inventory_id: UUID
+    bottles: float = Field(gt=0, le=1000000, allow_inf_nan=False)
+
+class Restock(BaseModel):
+    id: UUID
+    entries: list[RestockLine] = Field(min_length=1, max_length=500)
+    @field_validator('entries')
+    @classmethod
+    def unique_items(cls, entries):
+        if len({line.inventory_id for line in entries}) != len(entries):
+            raise ValueError('Select each ingredient once')
+        return entries
+
+@app.post('/api/restocks')
+def restock(data: Restock, request: Request):
+    uid=user_id(request)
+    fingerprint=hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+    with db() as conn:
+        conn.execute('select pg_advisory_xact_lock(%s)',(data.id.int % (2**63-1),))
+        existing=conn.execute('select user_id,request_hash from restock_batches where id=%s',(data.id,)).fetchone()
+        if existing:
+            if str(existing['user_id'])!=str(uid) or existing['request_hash']!=fingerprint:
+                raise HTTPException(409,'This delivery reference was already used. Close and check inventory before starting another delivery.')
+            return {'ok':True}
+        for line in sorted(data.entries,key=lambda entry:str(entry.inventory_id)):
+            item=conn.execute('select name,unit,bottle_size from inventory where id=%s and user_id=%s for update',(line.inventory_id,uid)).fetchone()
+            if not item: raise HTTPException(404,'Ingredient not found')
+            if not item['bottle_size']: raise HTTPException(400,f"Set bottle or pack capacity for {item['name']} first.")
+            amount=Decimal(str(line.bottles))*item['bottle_size']
+            conn.execute('update inventory set quantity=quantity+%s where id=%s and user_id=%s',(amount,line.inventory_id,uid))
+            conn.execute('insert into stock_events(id,user_id,item_name,unit,change,reason) values(%s,%s,%s,%s,%s,%s)',(uuid4(),uid,item['name'],item['unit'],amount,'Delivery received'))
+        conn.execute('insert into restock_batches(id,user_id,request_hash) values(%s,%s,%s)',(data.id,uid,fingerprint))
+    return {'ok':True}
 
 @app.patch('/api/inventory/{item_id}')
 def update_item(item_id: UUID, data: Stock, request: Request):

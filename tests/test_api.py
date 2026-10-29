@@ -38,6 +38,45 @@ class ApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.client.__exit__(None,None,None)
+    def test_delivery_adds_fractional_bottles_atomically_and_retries_once(self):
+        owner, foreign_owner=uuid4(),uuid4()
+        with db() as conn:
+            for uid in (owner,foreign_owner):
+                conn.execute('insert into app_users(id,google_sub,email) values(%s,%s,%s)',(uid,str(uid),f'{uid}@example.test'))
+        c=self.client;c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        for name in ('Delivery gin','Delivery rum'):
+            self.assertEqual(c.post('/api/inventory',json={'name':name,'category':'Gin','unit':'ml','bottle_size':750,'bottle_count':0.5,'low_stock_threshold':100,'target_stock':3000}).status_code,200)
+        stock=c.get('/api/state').json()['inventory'];a,b=stock
+        self.assertEqual(float(a['target_stock']),3000)
+        body={'id':str(uuid4()),'entries':[{'inventory_id':a['id'],'bottles':1.5},{'inventory_id':b['id'],'bottles':2}]}
+        self.assertEqual(c.post('/api/restocks',json=body).status_code,200)
+        self.assertEqual(c.post('/api/restocks',json=body).status_code,200)
+        after={row['id']:float(row['quantity']) for row in c.get('/api/state').json()['inventory']}
+        self.assertEqual(after[a['id']],1500);self.assertEqual(after[b['id']],1875)
+        body['entries'][0]['bottles']=3
+        self.assertEqual(c.post('/api/restocks',json=body).status_code,409)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(foreign_owner))
+        self.assertEqual(c.post('/api/restocks',json=body).status_code,409)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        # A later missing item must roll back the earlier valid addition.
+        ids=sorted([a['id'],b['id']]);missing='ffffffff-ffff-4fff-bfff-ffffffffffff'
+        invalid={'id':str(uuid4()),'entries':[{'inventory_id':ids[0],'bottles':1},{'inventory_id':missing,'bottles':1}]}
+        self.assertEqual(c.post('/api/restocks',json=invalid).status_code,404)
+        self.assertEqual(after,{row['id']:float(row['quantity']) for row in c.get('/api/state').json()['inventory']})
+        for bad in (0,-1):
+            invalid['entries']=[{'inventory_id':a['id'],'bottles':bad}]
+            self.assertEqual(c.post('/api/restocks',json=invalid).status_code,422)
+        invalid['entries']=[{'inventory_id':a['id'],'bottles':1}]*2
+        self.assertEqual(c.post('/api/restocks',json=invalid).status_code,422)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(foreign_owner))
+        invalid['entries']=[{'inventory_id':a['id'],'bottles':1}]
+        self.assertEqual(c.post('/api/restocks',json=invalid).status_code,404)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.post('/api/inventory',json={'name':'No capacity','category':'Other','unit':'ml','quantity':20}).status_code,200)
+        missing_capacity=next(row for row in c.get('/api/state').json()['inventory'] if row['name']=='No capacity')
+        invalid['entries']=[{'inventory_id':missing_capacity['id'],'bottles':1}]
+        self.assertEqual(c.post('/api/restocks',json=invalid).status_code,400)
+
     def test_catalog_upgrade_is_repeatable_and_preserves_existing_data(self):
         from tools.generate_catalog import build
         with db() as conn:
