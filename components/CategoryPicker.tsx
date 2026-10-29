@@ -8,6 +8,11 @@ const groups = [
   {id:'produce',label:'Produce & Pantry',categories:['Fruit','Garnish & Pantry']},
 ];
 const known = new Set(groups.flatMap(g=>g.categories));
+export function categoryGroupsFor(items:{category:string}[]) {
+  const present=new Set(items.map(item=>item.category));
+  const other=Array.from(present).filter(category=>!known.has(category)).sort();
+  return [...groups,{id:'other',label:'Other',categories:other}].map(group=>({...group,categories:group.categories.filter(category=>present.has(category))})).filter(group=>group.categories.length>0);
+}
 export function matchesCategory(category:string, value:string):boolean {
   if(value==='All')return true;
   if(value==='group:other')return !known.has(category);
