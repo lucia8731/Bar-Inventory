@@ -118,7 +118,8 @@ class ApiTests(unittest.TestCase):
         no_stock={'id':str(uuid4()),'entries':[entry('Empty recipe',price=0,deduct=False)]}
         self.assertEqual(c.post('/api/sales/batch',json=no_stock).status_code,200)
         self.assertEqual(c.get('/api/state').json()['inventory'][0]['quantity'],30)
-        c.cookies.set('bar_session',cookie(other))
+        c.cookies.clear();c.cookies.set('bar_session',cookie(other))
+        self.assertEqual(c.get('/api/session').json()['user']['id'],str(other))
         self.assertEqual(c.patch('/api/cocktails/'+aid+'/sales-pin',json={'pinned':False}).status_code,404)
         self.assertEqual(c.post('/api/sales/batch',json=body).status_code,409)
         self.assertEqual(c.post('/api/sales/batch',json={'id':str(uuid4()),'entries':[entry('Batch A',deduct=False)]}).status_code,404)
