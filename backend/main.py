@@ -117,7 +117,7 @@ def state(request: Request):
             'profile': conn.execute('select display_name, avatar_version, bar_name, bar_logo_version from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color, purchase_price, bottle_size, case when bottle_size is not null then quantity/bottle_size end as bottle_count from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
-            'cocktails': conn.execute('select id, name, glass_shape, glass_color, price from cocktails where user_id=%s order by name', (uid,)).fetchall(),
+            'cocktails': conn.execute('select id, name, glass_shape, glass_color, price, sales_pinned from cocktails where user_id=%s order by name', (uid,)).fetchall(),
             'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
             'sales': conn.execute('select id, item_name, quantity, unit_price, sold_at, payment_method, note, stock_deducted from sales where user_id=%s order by sold_at desc, id desc limit 500', (uid,)).fetchall(),
             'sales_summary': conn.execute('select coalesce(sum(quantity * unit_price::bigint),0) as revenue, coalesce(sum(quantity),0) as units, count(*) as entries from sales where user_id=%s', (uid,)).fetchone(),
@@ -208,6 +208,20 @@ class Sale(BaseModel):
         if value not in {'cash','card','other'}: raise ValueError('Invalid payment method')
         return value
 
+class SaleBatch(BaseModel):
+    id: UUID
+    entries: list[Sale] = Field(min_length=1, max_length=100)
+    @field_validator('entries')
+    @classmethod
+    def unique_entries(cls, value):
+        if len({entry.id for entry in value}) != len(value):
+            raise ValueError('Sale references must be unique')
+        if any(entry.cocktail_id is None for entry in value) or len({entry.cocktail_id for entry in value}) != len(value):
+            raise ValueError('Select each cocktail only once per batch')
+        return value
+class SalesPin(BaseModel):
+    pinned: bool = Field(strict=True)
+
 class Recipe(BaseModel):
     cocktail_id: UUID
     inventory_id: UUID
@@ -279,6 +293,13 @@ def update_cocktail(cocktail_id: UUID, data: CocktailStyle, request: Request):
         result = conn.execute('update cocktails set name=%s, glass_shape=%s, glass_color=%s, price=case when %s then %s else price end where id=%s and user_id=%s', (trimmed(data.name), data.glass_shape, data.glass_color, 'price' in data.model_fields_set, data.price, cocktail_id, user_id(request)))
         if not result.rowcount: raise HTTPException(404, 'Cocktail not found')
     return {'ok': True}
+
+@app.patch('/api/cocktails/{cocktail_id}/sales-pin')
+def pin_cocktail(cocktail_id: UUID, data: SalesPin, request: Request):
+    with db() as conn:
+        result=conn.execute('update cocktails set sales_pinned=%s where id=%s and user_id=%s',(data.pinned,cocktail_id,user_id(request)))
+        if not result.rowcount: raise HTTPException(404,'Cocktail not found')
+    return {'ok':True}
 
 @app.delete('/api/cocktails/{cocktail_id}')
 def delete_cocktail(cocktail_id: UUID, request: Request):
@@ -417,26 +438,55 @@ def remove_profile_photo(request: Request):
         conn.execute('update app_users set avatar_data=null, avatar_version=null where id=%s', (user_id(request),))
     return {'ok': True}
 
+def persist_sale(conn, uid, data: Sale, allow_retry=True):
+    fingerprint = hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+    conn.execute('select pg_advisory_xact_lock(%s)', (data.id.int % (2**63-1),))
+    existing = conn.execute('select user_id,request_hash from sales where id=%s', (data.id,)).fetchone()
+    if existing:
+        if not allow_retry or str(existing['user_id']) != str(uid) or existing['request_hash'] != fingerprint:
+            raise HTTPException(409, 'This sale reference has already been used.')
+        return
+    name = data.item_name.strip()
+    if data.cocktail_id:
+        lock_cocktail(conn, uid, data.cocktail_id)
+        name = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id,uid)).fetchone()['name']
+    elif data.deduct_stock:
+        raise HTTPException(400, 'Select a cocktail to deduct recipe stock.')
+    if not name: raise HTTPException(400, 'Enter an item name or select a cocktail.')
+    if data.deduct_stock:
+        consume_stock(conn, uid, data.cocktail_id, data.quantity, f'Sale: {name}')
+    conn.execute('insert into sales (id,user_id,cocktail_id,item_name,quantity,unit_price,sold_at,payment_method,note,stock_deducted,request_hash) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (data.id,uid,data.cocktail_id,name,data.quantity,data.unit_price,data.sold_at,data.payment_method,data.note.strip(),data.deduct_stock,fingerprint))
+
 @app.post('/api/sales')
 def record_sale(data: Sale, request: Request):
-    uid = user_id(request)
-    fingerprint = hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+    uid=UUID(str(user_id(request)))
     with db() as conn:
-        # Serialize retries so a successful sale cannot consume stock twice.
+        # Same user lock as batching: consistent order for overlapping sale references.
+        conn.execute('select pg_advisory_xact_lock(%s)', (uid.int % (2**63-1),))
+        persist_sale(conn,uid,data)
+    return {'ok':True}
+
+@app.post('/api/sales/batch')
+def record_sale_batch(data: SaleBatch, request: Request):
+    uid=UUID(str(user_id(request)))
+    fingerprint=hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+    with db() as conn:
+        conn.execute('select pg_advisory_xact_lock(%s)', (uid.int % (2**63-1),))
         conn.execute('select pg_advisory_xact_lock(%s)', (data.id.int % (2**63-1),))
-        existing = conn.execute('select user_id,request_hash from sales where id=%s', (data.id,)).fetchone()
+        existing=conn.execute('select user_id,request_hash from sale_batches where id=%s',(data.id,)).fetchone()
         if existing:
-            if str(existing['user_id']) != str(uid) or existing['request_hash'] != fingerprint:
-                raise HTTPException(409, 'This sale reference has already been used.')
-            return {'ok': True}
-        name = data.item_name.strip()
-        if data.cocktail_id:
-            lock_cocktail(conn, uid, data.cocktail_id)
-            name = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id,uid)).fetchone()['name']
-        elif data.deduct_stock:
-            raise HTTPException(400, 'Select a cocktail to deduct recipe stock.')
-        if not name: raise HTTPException(400, 'Enter an item name or select a cocktail.')
-        if data.deduct_stock:
-            consume_stock(conn, uid, data.cocktail_id, data.quantity, f'Sale: {name}')
-        conn.execute('insert into sales (id,user_id,cocktail_id,item_name,quantity,unit_price,sold_at,payment_method,note,stock_deducted,request_hash) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (data.id,uid,data.cocktail_id,name,data.quantity,data.unit_price,data.sold_at,data.payment_method,data.note.strip(),data.deduct_stock,fingerprint))
-    return {'ok': True}
+            if str(existing['user_id'])!=str(uid) or existing['request_hash']!=fingerprint:
+                raise HTTPException(409,'This batch was already recorded with different details. Check Sales history before starting another batch.')
+            return {'ok':True}
+        # Lock cocktails and all potentially shared stock in stable order before consuming any.
+        for cid in sorted((entry.cocktail_id for entry in data.entries),key=str):
+            lock_cocktail(conn,uid,cid)
+        deduct_ids=[entry.cocktail_id for entry in data.entries if entry.deduct_stock]
+        if deduct_ids:
+            conn.execute('''select i.id from inventory i where i.user_id=%s and i.id in
+                (select inventory_id from recipe_ingredients where user_id=%s and cocktail_id=any(%s))
+                order by i.id for update''',(uid,uid,deduct_ids)).fetchall()
+        for entry in sorted(data.entries,key=lambda item:str(item.id)):
+            persist_sale(conn,uid,entry,allow_retry=False)
+        conn.execute('insert into sale_batches(id,user_id,request_hash) values(%s,%s,%s)',(data.id,uid,fingerprint))
+    return {'ok':True}

@@ -88,3 +88,12 @@ alter table inventory add column if not exists bottle_size numeric check(bottle_
 alter table app_users add column if not exists bar_name text not null default '';
 alter table app_users add column if not exists bar_logo_data bytea;
 alter table app_users add column if not exists bar_logo_version uuid;
+
+-- Saved quick-sale favorites and durable idempotency for complete sale batches.
+alter table cocktails add column if not exists sales_pinned boolean not null default false;
+create table if not exists sale_batches (
+  id uuid primary key,
+  user_id uuid not null references app_users(id) on delete cascade,
+  request_hash text not null,
+  created_at timestamptz not null default now()
+);
