@@ -3,6 +3,7 @@ import os
 import io
 import warnings
 import hashlib
+from typing import Literal
 from decimal import Decimal
 from datetime import datetime
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -114,11 +115,11 @@ def state(request: Request):
     uid = user_id(request)
     with db() as conn:
         return {
-            'profile': conn.execute('select display_name, avatar_version, bar_name, bar_logo_version from app_users where id=%s', (uid,)).fetchone(),
+            'profile': conn.execute('select display_name, avatar_version, bar_name, bar_logo_version, preferred_unit from app_users where id=%s', (uid,)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color, purchase_price, bottle_size, case when bottle_size is not null then quantity/bottle_size end as bottle_count from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name, glass_shape, glass_color, price, sales_pinned from cocktails where user_id=%s order by name', (uid,)).fetchall(),
-            'ingredients': conn.execute('select cocktail_id, inventory_id, amount from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
+            'ingredients': conn.execute('select cocktail_id, inventory_id, amount, amount_unit from recipe_ingredients where user_id=%s', (uid,)).fetchall(),
             'sales': conn.execute('select id, item_name, quantity, unit_price, sold_at, payment_method, note, stock_deducted from sales where user_id=%s order by sold_at desc, id desc limit 500', (uid,)).fetchall(),
             'sales_summary': conn.execute('select coalesce(sum(quantity * unit_price::bigint),0) as revenue, coalesce(sum(quantity),0) as units, count(*) as entries from sales where user_id=%s', (uid,)).fetchone(),
             'activity': conn.execute('select id, item_name, unit, change, reason, created_at from stock_events where user_id=%s order by created_at desc, id desc limit 100', (uid,)).fetchall(),
@@ -176,7 +177,11 @@ class CocktailStyle(Name):
         if value not in COLORS: raise ValueError('Invalid glass color')
         return value
 
-class RecipeLine(BaseModel):
+class RecipeQuantity(BaseModel):
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    amount_unit: Literal['ml','oz','drop','dash','piece'] | None = None
+
+class RecipeLine(RecipeQuantity):
     inventory_id: UUID
     amount: float = Field(gt=0, allow_inf_nan=False)
 class NewCocktail(CocktailStyle):
@@ -223,17 +228,18 @@ class SaleBatch(BaseModel):
 class SalesPin(BaseModel):
     pinned: bool = Field(strict=True)
 
-class Recipe(BaseModel):
+class Recipe(RecipeQuantity):
     cocktail_id: UUID
     inventory_id: UUID
     amount: float = Field(gt=0, allow_inf_nan=False)
-class RecipeAmount(BaseModel):
+class RecipeAmount(RecipeQuantity):
     amount: float = Field(gt=0, allow_inf_nan=False)
 
 class Make(BaseModel):
     cocktail_id: UUID
     servings: int = Field(ge=1, le=1000)
 class Profile(BaseModel):
+    preferred_unit: Literal['ml','oz'] | None = None
     bar_name: str | None = Field(default=None, max_length=100)
     display_name: str = Field(max_length=100)
 
@@ -310,6 +316,16 @@ def delete_item(item_id: UUID, request: Request):
         if not result.rowcount: raise HTTPException(404, 'Ingredient not found')
     return {'ok': True}
 
+# Canonical recipe stock stays in ml / pieces. Dash/drop are explicit estimates.
+RECIPE_FACTORS={'ml':Decimal('1'),'oz':Decimal('29.5735295625'),'drop':Decimal('0.05'),'dash':Decimal('1'),'piece':Decimal('1')}
+def recipe_quantity(conn,uid,inventory_id,data):
+    item=conn.execute('select unit from inventory where id=%s and user_id=%s for key share',(inventory_id,uid)).fetchone()
+    if not item: raise HTTPException(400,'Every ingredient must be in your Inventory before adding it to a recipe')
+    unit=data.amount_unit or item['unit']
+    if (item['unit']=='piece') != (unit=='piece'):
+        raise HTTPException(400,'Use pieces for piece-based ingredients and liquid units for liquid ingredients.')
+    return Decimal(str(data.amount))*RECIPE_FACTORS[unit],data.amount_unit
+
 @app.post('/api/cocktails')
 def add_cocktail(data: NewCocktail, request: Request):
     uid, cid = user_id(request), uuid4()
@@ -320,7 +336,8 @@ def add_cocktail(data: NewCocktail, request: Request):
                 raise HTTPException(400, 'Every ingredient must be in your Inventory before adding it to a recipe')
         conn.execute('insert into cocktails (id,user_id,name,glass_shape,glass_color,price) values (%s,%s,%s,%s,%s,%s)', (cid, uid, trimmed(data.name), data.glass_shape, data.glass_color, data.price))
         for line in data.ingredients:
-            conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount) values (%s,%s,%s,%s)', (uid, cid, line.inventory_id, line.amount))
+            amount,unit=recipe_quantity(conn,uid,line.inventory_id,line)
+            conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount,amount_unit) values (%s,%s,%s,%s,%s)', (uid, cid, line.inventory_id, amount,unit))
     return {'ok': True}
 
 @app.patch('/api/cocktails/{cocktail_id}')
@@ -353,7 +370,8 @@ def add_recipe(data: Recipe, request: Request):
     uid = user_id(request)
     with db() as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
-        conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount) values (%s,%s,%s,%s)', (uid, data.cocktail_id, data.inventory_id, data.amount))
+        amount,unit=recipe_quantity(conn,uid,data.inventory_id,data)
+        conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount,amount_unit) values (%s,%s,%s,%s,%s)', (uid, data.cocktail_id, data.inventory_id, amount,unit))
     return {'ok': True}
 
 @app.patch('/api/recipes/{cocktail_id}/{item_id}')
@@ -361,7 +379,8 @@ def update_recipe_amount(cocktail_id: UUID, item_id: UUID, data: RecipeAmount, r
     uid = user_id(request)
     with db() as conn:
         lock_cocktail(conn, uid, cocktail_id)
-        result = conn.execute('update recipe_ingredients set amount=%s where cocktail_id=%s and inventory_id=%s and user_id=%s', (data.amount,cocktail_id,item_id,uid))
+        amount,unit=recipe_quantity(conn,uid,item_id,data)
+        result = conn.execute('update recipe_ingredients set amount=%s,amount_unit=%s where cocktail_id=%s and inventory_id=%s and user_id=%s', (amount,unit,cocktail_id,item_id,uid))
         if not result.rowcount: raise HTTPException(404, 'Recipe ingredient not found')
     return {'ok': True}
 
@@ -398,7 +417,7 @@ def make(data: Make, request: Request):
 @app.put('/api/profile')
 def save_profile(data: Profile, request: Request):
     with db() as conn:
-        conn.execute('update app_users set display_name=%s, bar_name=coalesce(%s,bar_name) where id=%s', (data.display_name.strip(), data.bar_name.strip() if data.bar_name is not None else None, user_id(request)))
+        conn.execute('update app_users set display_name=%s, bar_name=coalesce(%s,bar_name), preferred_unit=coalesce(%s,preferred_unit) where id=%s', (data.display_name.strip(), data.bar_name.strip() if data.bar_name is not None else None, data.preferred_unit, user_id(request)))
     return {'ok': True}
 
 async def normalized_image(request: Request, logo=False):

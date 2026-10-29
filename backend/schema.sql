@@ -104,3 +104,6 @@ create table if not exists restock_batches (
   request_hash text not null,
   created_at timestamptz not null default now()
 );
+
+alter table app_users add column if not exists preferred_unit text not null default 'ml' check(preferred_unit in ('ml','oz'));
+alter table recipe_ingredients add column if not exists amount_unit text check(amount_unit in ('ml','oz','drop','dash','piece'));

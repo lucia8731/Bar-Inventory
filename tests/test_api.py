@@ -77,6 +77,43 @@ class ApiTests(unittest.TestCase):
         invalid['entries']=[{'inventory_id':missing_capacity['id'],'bottles':1}]
         self.assertEqual(c.post('/api/restocks',json=invalid).status_code,400)
 
+    def test_recipe_units_keep_canonical_stock_and_profile_preference(self):
+        owner=uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users(id,google_sub,email) values(%s,%s,%s)',(owner,str(owner),f'{owner}@example.test'))
+        c=self.client;c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Unit test','bar_name':'Test Bar','preferred_unit':'oz'}).status_code,200)
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Updated'}).status_code,200)
+        profile=c.get('/api/state').json()['profile']
+        self.assertEqual(profile['preferred_unit'],'oz');self.assertEqual(profile['bar_name'],'Test Bar')
+        self.assertEqual(c.put('/api/profile',json={'display_name':'Unit test','preferred_unit':'litre'}).status_code,422)
+        self.assertEqual(c.post('/api/inventory',json={'name':'Unit bitters','category':'Bitters','unit':'ml','quantity':100}).status_code,200)
+        self.assertEqual(c.post('/api/inventory',json={'name':'Unit garnish','category':'Fruit','unit':'piece','quantity':10}).status_code,200)
+        items={item['name']:item['id'] for item in c.get('/api/state').json()['inventory']};liquid=items['Unit bitters'];piece=items['Unit garnish']
+        self.assertEqual(c.post('/api/cocktails',json={'name':'Unit recipe','ingredients':[{'inventory_id':liquid,'amount':2,'amount_unit':'dash'},{'inventory_id':piece,'amount':1,'amount_unit':'piece'}]}).status_code,200)
+        state=c.get('/api/state').json();cid=state['cocktails'][0]['id'];line=next(line for line in state['ingredients'] if line['inventory_id']==liquid)
+        self.assertEqual(float(line['amount']),2);self.assertEqual(line['amount_unit'],'dash')
+        endpoint=f'/api/recipes/{cid}/{liquid}'
+        self.assertEqual(c.patch(endpoint,json={'amount':4,'amount_unit':'drop'}).status_code,200)
+        self.assertEqual(c.post('/api/make',json={'cocktail_id':cid,'servings':1}).status_code,200)
+        state=c.get('/api/state').json();stock=next(item for item in state['inventory'] if item['id']==liquid)
+        self.assertAlmostEqual(float(stock['quantity']),99.8)
+        self.assertEqual(c.patch(endpoint,json={'amount':1,'amount_unit':'oz'}).status_code,200)
+        line=next(line for line in c.get('/api/state').json()['ingredients'] if line['inventory_id']==liquid)
+        self.assertAlmostEqual(float(line['amount']),29.5735295625)
+        self.assertEqual(c.patch(endpoint,json={'amount':1,'amount_unit':'piece'}).status_code,400)
+        self.assertEqual(c.patch(f'/api/recipes/{cid}/{piece}',json={'amount':1,'amount_unit':'drop'}).status_code,400)
+        self.assertEqual(c.patch(endpoint,json={'amount':1,'amount_unit':'bad'}).status_code,422)
+        self.assertEqual(c.patch(endpoint,json={'amount':30}).status_code,200)
+        line=next(line for line in c.get('/api/state').json()['ingredients'] if line['inventory_id']==liquid)
+        self.assertEqual(float(line['amount']),30);self.assertIsNone(line['amount_unit'])
+        self.assertEqual(c.delete(f'/api/recipes/{cid}/{liquid}').status_code,200)
+        self.assertEqual(c.post('/api/recipes',json={'cocktail_id':cid,'inventory_id':liquid,'amount':3,'amount_unit':'dash'}).status_code,200)
+        line=next(line for line in c.get('/api/state').json()['ingredients'] if line['inventory_id']==liquid)
+        self.assertEqual(float(line['amount']),3);self.assertEqual(line['amount_unit'],'dash')
+        self.assertEqual(c.post('/api/cocktails',json={'name':'Invalid unit recipe','ingredients':[{'inventory_id':piece,'amount':2,'amount_unit':'ml'}]}).status_code,400)
+        self.assertEqual(len(c.get('/api/state').json()['cocktails']),1)
+
     def test_catalog_upgrade_is_repeatable_and_preserves_existing_data(self):
         from tools.generate_catalog import build
         with db() as conn:

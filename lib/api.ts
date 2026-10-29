@@ -1,5 +1,5 @@
 export type Session = { user: { id: string; email: string; display_name: string } };
-type State = { profile: { display_name: string; avatar_version: string | null; bar_name: string; bar_logo_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
+type State = { profile: { preferred_unit:'ml'|'oz'; display_name: string; avatar_version: string | null; bar_name: string; bar_logo_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
 async function send(method: string, path: string, body?: object) {
   const response = await fetch(path, { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json();
