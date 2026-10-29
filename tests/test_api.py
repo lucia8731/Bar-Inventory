@@ -77,6 +77,54 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(len(after['cocktails']),1)
             self.assertEqual(len(after['ingredients']),2)
 
+    def test_quick_sales_batch_atomic_retries_and_pins(self):
+        c=self.client;owner=uuid4();other=uuid4()
+        with db() as conn:
+            conn.execute('insert into app_users(id,google_sub,email) values(%s,%s,%s),(%s,%s,%s)',(owner,str(owner),'batch@example.test',other,str(other),'batch-other@example.test'))
+        c.cookies.clear();c.cookies.set('bar_session',cookie(owner))
+        self.assertEqual(c.post('/api/inventory',json={'name':'Shared gin','category':'Gin','unit':'ml','quantity':100}).status_code,200)
+        for name in ('Batch A','Batch B','Empty recipe'):
+            self.assertEqual(c.post('/api/cocktails',json={'name':name,'price':1200}).status_code,200)
+        state=c.get('/api/state').json();item=state['inventory'][0];drinks={row['name']:row for row in state['cocktails']}
+        for name,amount in [('Batch A',20),('Batch B',30)]:
+            self.assertEqual(c.post('/api/recipes',json={'cocktail_id':drinks[name]['id'],'inventory_id':item['id'],'amount':amount}).status_code,200)
+        aid=drinks['Batch A']['id']
+        self.assertFalse(drinks['Batch A']['sales_pinned'])
+        self.assertEqual(c.patch('/api/cocktails/'+aid+'/sales-pin',json={'pinned':True}).status_code,200)
+        self.assertTrue(next(row for row in c.get('/api/state').json()['cocktails'] if row['id']==aid)['sales_pinned'])
+        self.assertEqual(c.patch('/api/cocktails/'+aid+'/sales-pin',json={'pinned':'yes'}).status_code,422)
+        def entry(name,quantity=1,price=1200,deduct=True):
+            return {'id':str(uuid4()),'cocktail_id':drinks[name]['id'],'quantity':quantity,'unit_price':price,'sold_at':'2026-10-29T13:00:00+09:00','payment_method':'card','deduct_stock':deduct}
+        body={'id':str(uuid4()),'entries':[entry('Batch A',2),entry('Batch B')]}
+        for _ in range(2):self.assertEqual(c.post('/api/sales/batch',json=body).status_code,200)
+        state=c.get('/api/state').json()
+        self.assertEqual(state['inventory'][0]['quantity'],30)
+        self.assertEqual(state['sales_summary'],{'revenue':3600,'units':3,'entries':2})
+        self.assertEqual(len(state['activity']),2)
+        changed={**body,'entries':[{**body['entries'][0],'unit_price':1},body['entries'][1]]}
+        self.assertEqual(c.post('/api/sales/batch',json=changed).status_code,409)
+        failed_id=str(uuid4())
+        # Shared stock can cover either recipe alone, but not the complete new batch.
+        self.assertEqual(c.post('/api/sales/batch',json={'id':failed_id,'entries':[entry('Batch A'),entry('Batch B')]}).status_code,400)
+        with db() as conn:self.assertIsNone(conn.execute('select id from sale_batches where id=%s',(failed_id,)).fetchone())
+        after=c.get('/api/state').json()
+        self.assertEqual(after['inventory'][0]['quantity'],30)
+        self.assertEqual(after['sales_summary'],state['sales_summary'])
+        self.assertEqual(len(after['activity']),2)
+        self.assertEqual(c.post('/api/sales/batch',json={'id':str(uuid4()),'entries':[entry('Empty recipe')]}).status_code,400)
+        self.assertEqual(c.post('/api/sales/batch',json={'id':str(uuid4()),'entries':[body['entries'][0]]}).status_code,409)
+        for entries in [[],[entry('Batch A'),entry('Batch A')],[entry('Batch A',0)],[entry('Batch A',price=-1)]]:
+            self.assertEqual(c.post('/api/sales/batch',json={'id':str(uuid4()),'entries':entries}).status_code,422)
+        no_stock={'id':str(uuid4()),'entries':[entry('Empty recipe',price=0,deduct=False)]}
+        self.assertEqual(c.post('/api/sales/batch',json=no_stock).status_code,200)
+        self.assertEqual(c.get('/api/state').json()['inventory'][0]['quantity'],30)
+        c.cookies.clear();c.cookies.set('bar_session',cookie(other))
+        self.assertEqual(c.get('/api/session').json()['user']['id'],str(other))
+        self.assertEqual(c.patch('/api/cocktails/'+aid+'/sales-pin',json={'pinned':False}).status_code,404)
+        self.assertEqual(c.post('/api/sales/batch',json=body).status_code,409)
+        self.assertEqual(c.post('/api/sales/batch',json={'id':str(uuid4()),'entries':[entry('Batch A',deduct=False)]}).status_code,404)
+        self.assertEqual(c.get('/api/state').json()['sales_summary']['entries'],0)
+
     def test_sales_and_glass_styles(self):
         c = self.client
         owner = uuid4()
