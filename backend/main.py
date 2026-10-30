@@ -7,7 +7,7 @@ from typing import Literal
 from decimal import Decimal
 from datetime import datetime
 from PIL import Image, ImageOps, UnidentifiedImageError
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager,contextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -18,6 +18,7 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator
+from backend.management import register_management,audit,recipe_cost,assert_day_open,workspace_lock
 from tools.appearance import SHAPES, COLORS, infer
 from starlette.middleware.sessions import SessionMiddleware
 from tools.generate_catalog import build as build_catalog
@@ -67,11 +68,41 @@ async def integrity_error(request, exc):
         return JSONResponse({'detail': 'This ingredient is used in a recipe. Remove it from the recipe first.'}, status_code=400)
     return JSONResponse({'detail': 'That item already exists or has invalid values.'}, status_code=400)
 
+def actor_id(request: Request) -> str:
+    uid=request.session.get('user_id')
+    if not uid:raise HTTPException(401,'Please sign in.')
+    return str(uid)
+
 def user_id(request: Request) -> str:
-    uid = request.session.get('user_id')
-    if not uid:
-        raise HTTPException(401, 'Please sign in.')
+    actor=actor_id(request);uid=str(request.session.get('bar_id') or actor)
+    if uid!=actor:
+        with db() as conn:
+            member=conn.execute('select 1 from bar_members where owner_id=%s and member_id=%s',(uid,actor)).fetchone()
+        if not member:
+            if request.method=='GET' and request.url.path in ('/api/state','/api/workspaces'):
+                request.session['bar_id']=actor;return actor
+            raise HTTPException(403,'Your access to this bar has been removed. Switch to your own bar.')
+        path=request.url.path
+        personal=path=='/api/profile' or path.startswith('/api/profile/photo')
+        operational=path in ('/api/sales','/api/sales/batch','/api/restocks','/api/stocktakes','/api/waste') or path.startswith('/api/purchases/') and path.endswith('/receive') or path.startswith('/api/cocktails/') and path.endswith('/sales-pin')
+        if request.method not in ('GET','HEAD') and not personal and not operational:
+            raise HTTPException(403,'Owner access required for this action.')
     return uid
+
+@contextmanager
+def audited_db(request):
+    uid=actor_id(request) if request.url.path in ('/api/profile','/api/profile/photo') else user_id(request)
+    with db() as conn:
+        yield conn
+        path=request.url.path
+        labels={'inventory':'Updated inventory','cocktails':'Updated cocktail','recipes':'Updated recipe','sales':'Recorded sales','restocks':'Recorded delivery','make':'Recorded drinks made','profile':'Updated profile'}
+        section=path.split('/')[2] if len(path.split('/'))>2 else 'operation'
+        label=labels.get(section,'Updated bar')
+        if request.method=='DELETE':label='Removed '+{'inventory':'ingredient','cocktails':'cocktail','recipes':'recipe ingredient','profile':'profile image'}.get(section,'record')
+        if section=='inventory' and request.method!='DELETE' and len(path.split('/'))==4:
+            item=conn.execute('select name from inventory where id=%s and user_id=%s',(path.split('/')[-1],uid)).fetchone()
+            if item:label+=': '+item['name']
+        audit(conn,uid,actor_id(request),label)
 
 @app.get('/api/auth/login')
 async def login(request: Request):
@@ -115,7 +146,8 @@ def state(request: Request):
     uid = user_id(request)
     with db() as conn:
         return {
-            'profile': conn.execute('select display_name, avatar_version, bar_name, bar_logo_version, preferred_unit from app_users where id=%s', (uid,)).fetchone(),
+            'workspace': {'owner_id':uid,'actor_id':actor_id(request),'role':'owner' if uid==actor_id(request) else 'staff'},
+            'profile': conn.execute('select p.display_name,p.avatar_version,p.preferred_unit,b.bar_name,b.bar_logo_version from app_users p cross join app_users b where p.id=%s and b.id=%s',(actor_id(request),uid)).fetchone(),
             'inventory': conn.execute('select id, name, category, unit, quantity, low_stock_threshold, target_stock, supplier, image_url, container_shape, container_color, purchase_price, bottle_size, case when bottle_size is not null then quantity/bottle_size end as bottle_count from inventory where user_id=%s order by name', (uid,)).fetchall(),
             'catalog': conn.execute('select id, name, category, unit, container_shape, container_color from catalog order by name').fetchall(),
             'cocktails': conn.execute('select id, name, glass_shape, glass_color, price, sales_pinned from cocktails where user_id=%s order by name', (uid,)).fetchall(),
@@ -258,7 +290,7 @@ def add_item(data: NewItem, request: Request):
         if data.bottle_size is None: raise HTTPException(400, 'Enter the capacity of one bottle or pack.')
         if 'quantity' in data.model_fields_set: raise HTTPException(400, 'Use either total stock or bottle count, not both.')
         quantity = Decimal(str(data.bottle_count)) * Decimal(str(data.bottle_size))
-    with db() as conn:
+    with audited_db(request) as conn:
         conn.execute('insert into inventory (id,user_id,name,category,unit,quantity,low_stock_threshold,container_shape,container_color,purchase_price,bottle_size,target_stock) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (uuid4(), uid, trimmed(data.name), trimmed(data.category), data.unit, quantity, data.low_stock_threshold, data.container_shape or shape, data.container_color or color, data.purchase_price, data.bottle_size, data.target_stock))
     return {'ok': True}
 
@@ -280,7 +312,8 @@ class Restock(BaseModel):
 def restock(data: Restock, request: Request):
     uid=user_id(request)
     fingerprint=hashlib.sha256(data.model_dump_json().encode()).hexdigest()
-    with db() as conn:
+    with audited_db(request) as conn:
+        workspace_lock(conn,uid)
         conn.execute('select pg_advisory_xact_lock(%s)',(data.id.int % (2**63-1),))
         existing=conn.execute('select user_id,request_hash from restock_batches where id=%s',(data.id,)).fetchone()
         if existing:
@@ -302,7 +335,7 @@ def update_item(item_id: UUID, data: Stock, request: Request):
     uid = user_id(request)
     if data.image_url and not data.image_url.startswith('https://'):
         raise HTTPException(400, 'Image URL must start with https://')
-    with db() as conn:
+    with audited_db(request) as conn:
         item = conn.execute('select name, unit, quantity from inventory where id=%s and user_id=%s for update', (item_id, uid)).fetchone()
         if not item: raise HTTPException(404, 'Ingredient not found')
         conn.execute('update inventory set quantity=%s, low_stock_threshold=%s, target_stock=%s, supplier=%s, image_url=%s, container_shape=coalesce(%s,container_shape), container_color=coalesce(%s,container_color), purchase_price=case when %s then %s else purchase_price end, bottle_size=case when %s then %s else bottle_size end where id=%s and user_id=%s', (data.quantity, data.low_stock_threshold, data.target_stock, data.supplier.strip(), data.image_url.strip(), data.container_shape, data.container_color, 'purchase_price' in data.model_fields_set, data.purchase_price, 'bottle_size' in data.model_fields_set, data.bottle_size, item_id, uid))
@@ -311,7 +344,7 @@ def update_item(item_id: UUID, data: Stock, request: Request):
 
 @app.delete('/api/inventory/{item_id}')
 def delete_item(item_id: UUID, request: Request):
-    with db() as conn:
+    with audited_db(request) as conn:
         result = conn.execute('delete from inventory where id=%s and user_id=%s', (item_id, user_id(request)))
         if not result.rowcount: raise HTTPException(404, 'Ingredient not found')
     return {'ok': True}
@@ -329,7 +362,7 @@ def recipe_quantity(conn,uid,inventory_id,data):
 @app.post('/api/cocktails')
 def add_cocktail(data: NewCocktail, request: Request):
     uid, cid = user_id(request), uuid4()
-    with db() as conn:
+    with audited_db(request) as conn:
         # Validate and lock only this user's stock, then save the whole recipe atomically.
         for line in sorted(data.ingredients, key=lambda item: str(item.inventory_id)):
             if not conn.execute('select id from inventory where id=%s and user_id=%s for key share', (line.inventory_id, uid)).fetchone():
@@ -342,21 +375,21 @@ def add_cocktail(data: NewCocktail, request: Request):
 
 @app.patch('/api/cocktails/{cocktail_id}')
 def update_cocktail(cocktail_id: UUID, data: CocktailStyle, request: Request):
-    with db() as conn:
+    with audited_db(request) as conn:
         result = conn.execute('update cocktails set name=%s, glass_shape=%s, glass_color=%s, price=case when %s then %s else price end where id=%s and user_id=%s', (trimmed(data.name), data.glass_shape, data.glass_color, 'price' in data.model_fields_set, data.price, cocktail_id, user_id(request)))
         if not result.rowcount: raise HTTPException(404, 'Cocktail not found')
     return {'ok': True}
 
 @app.patch('/api/cocktails/{cocktail_id}/sales-pin')
 def pin_cocktail(cocktail_id: UUID, data: SalesPin, request: Request):
-    with db() as conn:
+    with audited_db(request) as conn:
         result=conn.execute('update cocktails set sales_pinned=%s where id=%s and user_id=%s',(data.pinned,cocktail_id,user_id(request)))
         if not result.rowcount: raise HTTPException(404,'Cocktail not found')
     return {'ok':True}
 
 @app.delete('/api/cocktails/{cocktail_id}')
 def delete_cocktail(cocktail_id: UUID, request: Request):
-    with db() as conn:
+    with audited_db(request) as conn:
         result = conn.execute('delete from cocktails where id=%s and user_id=%s', (cocktail_id, user_id(request)))
         if not result.rowcount: raise HTTPException(404, 'Cocktail not found')
     return {'ok': True}
@@ -368,7 +401,7 @@ def lock_cocktail(conn, uid, cocktail_id):
 @app.post('/api/recipes')
 def add_recipe(data: Recipe, request: Request):
     uid = user_id(request)
-    with db() as conn:
+    with audited_db(request) as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
         amount,unit=recipe_quantity(conn,uid,data.inventory_id,data)
         conn.execute('insert into recipe_ingredients (user_id,cocktail_id,inventory_id,amount,amount_unit) values (%s,%s,%s,%s,%s)', (uid, data.cocktail_id, data.inventory_id, amount,unit))
@@ -377,7 +410,7 @@ def add_recipe(data: Recipe, request: Request):
 @app.patch('/api/recipes/{cocktail_id}/{item_id}')
 def update_recipe_amount(cocktail_id: UUID, item_id: UUID, data: RecipeAmount, request: Request):
     uid = user_id(request)
-    with db() as conn:
+    with audited_db(request) as conn:
         lock_cocktail(conn, uid, cocktail_id)
         if not conn.execute('select 1 from recipe_ingredients where cocktail_id=%s and inventory_id=%s and user_id=%s',(cocktail_id,item_id,uid)).fetchone():
             raise HTTPException(404,'Recipe ingredient not found')
@@ -389,7 +422,7 @@ def update_recipe_amount(cocktail_id: UUID, item_id: UUID, data: RecipeAmount, r
 @app.delete('/api/recipes/{cocktail_id}/{item_id}')
 def delete_recipe(cocktail_id: UUID, item_id: UUID, request: Request):
     uid = user_id(request)
-    with db() as conn:
+    with audited_db(request) as conn:
         lock_cocktail(conn, uid, cocktail_id)
         result = conn.execute('delete from recipe_ingredients where cocktail_id=%s and inventory_id=%s and user_id=%s', (cocktail_id, item_id, uid))
         if not result.rowcount: raise HTTPException(404, 'Recipe ingredient not found')
@@ -410,7 +443,7 @@ def consume_stock(conn, uid, cocktail_id, servings, reason):
 @app.post('/api/make')
 def make(data: Make, request: Request):
     uid = user_id(request)
-    with db() as conn:
+    with audited_db(request) as conn:
         lock_cocktail(conn, uid, data.cocktail_id)
         cocktail = conn.execute('select name from cocktails where id=%s and user_id=%s', (data.cocktail_id, uid)).fetchone()
         consume_stock(conn, uid, data.cocktail_id, data.servings, f"Made {data.servings} × {cocktail['name']}")
@@ -418,8 +451,11 @@ def make(data: Make, request: Request):
 
 @app.put('/api/profile')
 def save_profile(data: Profile, request: Request):
-    with db() as conn:
-        conn.execute('update app_users set display_name=%s, bar_name=coalesce(%s,bar_name), preferred_unit=coalesce(%s,preferred_unit) where id=%s', (data.display_name.strip(), data.bar_name.strip() if data.bar_name is not None else None, data.preferred_unit, user_id(request)))
+    uid=user_id(request);actor=actor_id(request)
+    if data.bar_name is not None and uid!=actor:raise HTTPException(403,'Only the bar owner can change the bar name')
+    with audited_db(request) as conn:
+        conn.execute('update app_users set display_name=%s, preferred_unit=coalesce(%s,preferred_unit) where id=%s',(data.display_name.strip(),data.preferred_unit,actor))
+        if data.bar_name is not None:conn.execute('update app_users set bar_name=%s where id=%s',(data.bar_name.strip(),uid))
     return {'ok': True}
 
 async def normalized_image(request: Request, logo=False):
@@ -455,9 +491,9 @@ async def normalized_image(request: Request, logo=False):
 
 @app.post('/api/profile/photo')
 async def upload_profile_photo(request: Request):
-    uid = user_id(request)
+    uid = actor_id(request)
     photo = await normalized_image(request)
-    with db() as conn:
+    with audited_db(request) as conn:
         conn.execute('update app_users set avatar_data=%s, avatar_version=%s where id=%s', (photo, uuid4(), uid))
     return {'ok': True}
 
@@ -465,7 +501,7 @@ async def upload_profile_photo(request: Request):
 async def upload_bar_logo(request: Request):
     uid = user_id(request)
     logo = await normalized_image(request, logo=True)
-    with db() as conn:
+    with audited_db(request) as conn:
         conn.execute('update app_users set bar_logo_data=%s, bar_logo_version=%s where id=%s', (logo,uuid4(),uid))
     return {'ok': True}
 
@@ -478,21 +514,21 @@ def bar_logo(request: Request):
 
 @app.delete('/api/profile/bar-logo')
 def remove_bar_logo(request: Request):
-    with db() as conn:
+    with audited_db(request) as conn:
         conn.execute('update app_users set bar_logo_data=null,bar_logo_version=null where id=%s',(user_id(request),))
     return {'ok': True}
 
 @app.get('/api/profile/photo')
 def profile_photo(request: Request):
     with db() as conn:
-        row = conn.execute('select avatar_data from app_users where id=%s', (user_id(request),)).fetchone()
+        row = conn.execute('select avatar_data from app_users where id=%s', (actor_id(request),)).fetchone()
     if not row or row['avatar_data'] is None: raise HTTPException(404, 'No profile photo yet.')
     return Response(bytes(row['avatar_data']), media_type='image/jpeg', headers={'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff'})
 
 @app.delete('/api/profile/photo')
 def remove_profile_photo(request: Request):
-    with db() as conn:
-        conn.execute('update app_users set avatar_data=null, avatar_version=null where id=%s', (user_id(request),))
+    with audited_db(request) as conn:
+        conn.execute('update app_users set avatar_data=null, avatar_version=null where id=%s', (actor_id(request),))
     return {'ok': True}
 
 def persist_sale(conn, uid, data: Sale, allow_retry=True):
@@ -503,6 +539,7 @@ def persist_sale(conn, uid, data: Sale, allow_retry=True):
         if not allow_retry or str(existing['user_id']) != str(uid) or existing['request_hash'] != fingerprint:
             raise HTTPException(409, 'This sale reference has already been used.')
         return
+    assert_day_open(conn,uid,data.sold_at)
     name = data.item_name.strip()
     if data.cocktail_id:
         lock_cocktail(conn, uid, data.cocktail_id)
@@ -510,14 +547,15 @@ def persist_sale(conn, uid, data: Sale, allow_retry=True):
     elif data.deduct_stock:
         raise HTTPException(400, 'Select a cocktail to deduct recipe stock.')
     if not name: raise HTTPException(400, 'Enter an item name or select a cocktail.')
+    cost=recipe_cost(conn,uid,data.cocktail_id) if data.cocktail_id else None
     if data.deduct_stock:
         consume_stock(conn, uid, data.cocktail_id, data.quantity, f'Sale: {name}')
-    conn.execute('insert into sales (id,user_id,cocktail_id,item_name,quantity,unit_price,sold_at,payment_method,note,stock_deducted,request_hash) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (data.id,uid,data.cocktail_id,name,data.quantity,data.unit_price,data.sold_at,data.payment_method,data.note.strip(),data.deduct_stock,fingerprint))
+    conn.execute('insert into sales (id,user_id,cocktail_id,item_name,quantity,unit_price,sold_at,payment_method,note,stock_deducted,request_hash,material_cost_per_unit) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', (data.id,uid,data.cocktail_id,name,data.quantity,data.unit_price,data.sold_at,data.payment_method,data.note.strip(),data.deduct_stock,fingerprint,cost))
 
 @app.post('/api/sales')
 def record_sale(data: Sale, request: Request):
     uid=UUID(str(user_id(request)))
-    with db() as conn:
+    with audited_db(request) as conn:
         # Same user lock as batching: consistent order for overlapping sale references.
         conn.execute('select pg_advisory_xact_lock(%s)', (uid.int % (2**63-1),))
         persist_sale(conn,uid,data)
@@ -527,7 +565,7 @@ def record_sale(data: Sale, request: Request):
 def record_sale_batch(data: SaleBatch, request: Request):
     uid=UUID(str(user_id(request)))
     fingerprint=hashlib.sha256(data.model_dump_json().encode()).hexdigest()
-    with db() as conn:
+    with audited_db(request) as conn:
         conn.execute('select pg_advisory_xact_lock(%s)', (uid.int % (2**63-1),))
         conn.execute('select pg_advisory_xact_lock(%s)', (data.id.int % (2**63-1),))
         existing=conn.execute('select user_id,request_hash from sale_batches where id=%s',(data.id,)).fetchone()
@@ -547,3 +585,5 @@ def record_sale_batch(data: SaleBatch, request: Request):
             persist_sale(conn,uid,entry,allow_retry=False)
         conn.execute('insert into sale_batches(id,user_id,request_hash) values(%s,%s,%s)',(data.id,uid,fingerprint))
     return {'ok':True}
+
+register_management(app,db,user_id,actor_id)

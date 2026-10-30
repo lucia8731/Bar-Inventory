@@ -1,5 +1,5 @@
 export type Session = { user: { id: string; email: string; display_name: string } };
-type State = { profile: { preferred_unit:'ml'|'oz'; display_name: string; avatar_version: string | null; bar_name: string; bar_logo_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
+type State = { workspace:{owner_id:string;actor_id:string;role:'owner'|'staff'}; profile: { preferred_unit:'ml'|'oz'; display_name: string; avatar_version: string | null; bar_name: string; bar_logo_version: string | null }; inventory: never[]; catalog: never[]; cocktails: never[]; ingredients: never[]; activity: never[]; sales: never[]; sales_summary: {revenue:number;units:number;entries:number} };
 async function send(method: string, path: string, body?: object) {
   const response = await fetch(path, { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   const data = await response.json();
@@ -7,6 +7,7 @@ async function send(method: string, path: string, body?: object) {
   return data;
 }
 export const api = {
+  data:send,
   async uploadPhoto(file: File, path: '/api/profile/photo' | '/api/profile/bar-logo' = '/api/profile/photo'): Promise<{ error: { message: string } | null }> {
     try {
       const response = await fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
