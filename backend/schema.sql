@@ -181,3 +181,12 @@ create table if not exists day_closures (
  reopened_at timestamptz,reopen_reason text
 );
 create unique index if not exists one_active_day_close on day_closures(user_id,business_date) where reopened_at is null;
+
+create index if not exists members_member on bar_members(member_id);
+create index if not exists invites_pending_email on bar_invites(lower(email)) where accepted_at is null and revoked_at is null;
+create index if not exists stocktakes_user_time on stocktakes(user_id,created_at desc);
+create index if not exists suppliers_user_name on suppliers(user_id,name);
+create index if not exists purchases_user_time on purchase_orders(user_id,created_at desc);
+create index if not exists purchase_lines_order on purchase_order_lines(order_id);
+create index if not exists stocktake_lines_parent on stocktake_lines(stocktake_id);
+create index if not exists closures_user_date on day_closures(user_id,business_date desc);

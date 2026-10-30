@@ -99,7 +99,7 @@ class ManagementTests(unittest.TestCase):
   self.sign(self.other);self.assertEqual(c.post('/api/team/invitations/'+invite['id']+'/accept').status_code,404)
   self.sign(self.staff);self.assertEqual(len(c.get('/api/workspaces').json()['invitations']),1)
   self.assertEqual(c.post('/api/team/invitations/'+invite['id']+'/accept').status_code,200)
-  staff_cookie=c.cookies.get('bar_session')
+  staff_cookie=[entry.value for entry in c.cookies.jar if entry.name=='bar_session'][-1]
   state=c.get('/api/state').json();self.assertEqual(state['workspace']['role'],'staff');self.assertEqual(len(state['inventory']),1)
   self.assertEqual(c.post('/api/sales',json=self.sale(drink['id'])).status_code,200)
   for endpoint,body in [('/api/inventory',{'name':'Forbidden','category':'Gin','unit':'ml'}),('/api/cocktails',{'name':'Forbidden'}),('/api/team/invite',{'email':'someone@example.test'}),('/api/closing',{'id':str(uuid4()),'day':'2026-01-10','opening_cash':0,'actual_cash':0})]:
@@ -115,3 +115,37 @@ class ManagementTests(unittest.TestCase):
   self.assertEqual(c.post('/api/sales',json=self.sale(drink['id'])).status_code,403)
   self.assertEqual(c.post('/api/workspaces/switch',json={'owner_id':str(self.owner)}).status_code,403)
   self.assertEqual(len(c.get('/api/state').json()['inventory']),0)
+ def test_concurrent_retry_and_stocktake_never_overwrite_a_sale(self):
+  from concurrent.futures import ThreadPoolExecutor
+  c=self.client;i=self.item();drink=self.recipe(i)
+  count={'id':str(uuid4()),'entries':[{'inventory_id':i['id'],'expected':1400,'actual':700,'bottle_size':700}]};sale=self.sale(drink['id'])
+  def post(path,body):
+   client=TestClient(app,base_url='http://testserver',headers={'Origin':'http://testserver'});client.cookies.set('bar_session',cookie(self.owner))
+   try:return client.post(path,json=body).status_code
+   finally:client.close()
+  with ThreadPoolExecutor(max_workers=2) as pool:
+   a=pool.submit(post,'/api/stocktakes',count);b=pool.submit(post,'/api/sales',sale);count_status,sale_status=a.result(),b.result()
+  self.assertEqual(sale_status,200);self.assertIn(count_status,(200,409));self.assertEqual(self.quantities()[i['id']],640 if count_status==200 else 1340)
+  waste={'id':str(uuid4()),'inventory_id':i['id'],'amount':10,'reason':'test','occurred_at':'2026-01-12T10:00:00+09:00'};before=self.quantities()[i['id']]
+  with ThreadPoolExecutor(max_workers=2) as pool:
+   statuses=list(pool.map(lambda _:post('/api/waste',waste),range(2)))
+  self.assertEqual(statuses,[200,200]);self.assertEqual(self.quantities()[i['id']],before-10)
+ def test_closed_batch_rolls_back_every_sale_and_stock_change(self):
+  c=self.client;i=self.item();drink=self.recipe(i);close={'id':str(uuid4()),'day':'2026-01-10','opening_cash':0,'actual_cash':0};self.assertEqual(c.post('/api/closing',json=close).status_code,200)
+  entries=[self.sale(drink['id'],at='2026-01-09T12:00:00+09:00'),self.sale(drink['id'])]
+  body={'id':str(uuid4()),'entries':entries}
+  # Batch validation permits only one line per cocktail; use a second recipe.
+  other=self.recipe(i,name='Second drink');body['entries'][1]['cocktail_id']=other['id']
+  self.assertEqual(c.post('/api/sales/batch',json=body).status_code,409);self.assertEqual(self.quantities()[i['id']],1400);self.assertEqual(c.get('/api/state').json()['sales_summary']['entries'],0)
+ def test_staff_receipt_cost_guard_and_supplier_deletion(self):
+  c=self.client;i=self.item();c.post('/api/suppliers',json={'name':'Original supplier'})
+  supplier=c.get('/api/management?section=purchases').json()['suppliers'][0];order_id=str(uuid4());self.assertEqual(c.post('/api/purchases',json={'id':order_id,'supplier_id':supplier['id'],'lines':[{'inventory_id':i['id'],'bottles':1,'unit_price':999}]}).status_code,200);c.patch('/api/purchases/'+order_id,json={'status':'ordered'})
+  line=c.get('/api/management?section=purchases').json()['orders'][0]['lines'][0]
+  c.post('/api/team/invite',json={'email':f'{self.staff}@example.test'});invite=c.get('/api/management?section=team').json()['invites'][0]
+  self.sign(self.staff);c.post('/api/team/invitations/'+invite['id']+'/accept')
+  body={'id':str(uuid4()),'update_cost':True,'lines':[{'line_id':line['id'],'bottles':1}]};endpoint='/api/purchases/'+order_id+'/receive'
+  self.assertEqual(c.post(endpoint,json=body).status_code,403);body['update_cost']=False;self.assertEqual(c.post(endpoint,json=body).status_code,200)
+  self.assertEqual(c.get('/api/state').json()['inventory'][0]['purchase_price'],700)
+  self.sign(self.owner);self.assertEqual(c.delete('/api/suppliers/'+supplier['id']).status_code,200)
+  saved=c.get('/api/management?section=purchases').json()['orders'][0];self.assertEqual(saved['supplier_name'],'Original supplier');self.assertIsNone(saved['supplier_id'])
+  self.sign(self.other);self.assertEqual(c.get('/api/management').json()['orders'],[]);self.assertEqual(c.get('/api/dashboard?period=custom&start=2026-01-01&end=2026-01-31').json()['totals']['revenue'],0)

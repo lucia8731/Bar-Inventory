@@ -255,23 +255,31 @@ def register_management(app,db,user_id,actor_id):
         return {'ok':True}
 
     @app.get('/api/management')
-    def management(request:Request):
+    def management(request:Request,section:Literal['all','costs','stocktake','waste','purchases','closing','team','audit','clock']='all'):
         uid=user_id(request)
         with db() as conn:
-            recipes,value,unknown=recipe_report(conn,uid)
-            orders=conn.execute('select * from purchase_orders where user_id=%s order by created_at desc limit 200',(uid,)).fetchall()
-            for order in orders:order['lines']=conn.execute('select * from purchase_order_lines where order_id=%s order by item_name',(order['id'],)).fetchall()
-            counts=conn.execute('''select t.*,u.display_name actor_name from stocktakes t left join app_users u on u.id=t.actor_id where t.user_id=%s order by t.created_at desc limit 100''',(uid,)).fetchall()
-            for count in counts:count['lines']=conn.execute('select * from stocktake_lines where stocktake_id=%s order by item_name',(count['id'],)).fetchall()
-            return {'recipes':recipes,'inventory_value':value,'unvalued_items':unknown,'orders':orders,
-                'suppliers':conn.execute('select * from suppliers where user_id=%s order by name',(uid,)).fetchall(),
-                'stocktakes':counts,'waste':conn.execute('select w.*,u.display_name actor_name from waste_events w left join app_users u on u.id=w.actor_id where w.user_id=%s order by occurred_at desc limit 200',(uid,)).fetchall(),
-                'closures':conn.execute('select * from day_closures where user_id=%s order by business_date desc,closed_at desc limit 100',(uid,)).fetchall(),
-                'audit':conn.execute('''select a.*,coalesce(nullif(u.display_name,''),u.email,'Former member') actor_name from audit_events a left join app_users u on u.id=a.actor_id where a.user_id=%s order by a.created_at desc limit 200''',(uid,)).fetchall(),
-                'members':conn.execute('select u.id,u.email,u.display_name from bar_members m join app_users u on u.id=m.member_id where m.owner_id=%s order by u.display_name',(uid,)).fetchall(),
-                'invites':conn.execute('select id,email,expires_at from bar_invites where owner_id=%s and accepted_at is null and revoked_at is null and expires_at>now() order by created_at desc',(uid,)).fetchall() if str(uid)==str(actor_id(request)) else [],
-                'clock':conn.execute('select bar_timezone,day_start from app_users where id=%s',(uid,)).fetchone(),
-                'business_date':business_date(conn,uid)}
+            result={'recipes':[],'inventory_value':0,'unvalued_items':0,'orders':[],'suppliers':[],'stocktakes':[],'waste':[],'closures':[],'audit':[],'members':[],'invites':[],
+                'clock':conn.execute('select bar_timezone,day_start from app_users where id=%s',(uid,)).fetchone(),'business_date':business_date(conn,uid)}
+            if section in ('all','costs'):
+                result['recipes'],result['inventory_value'],result['unvalued_items']=recipe_report(conn,uid)
+            if section in ('all','purchases'):
+                orders=conn.execute('select * from purchase_orders where user_id=%s order by created_at desc limit 200',(uid,)).fetchall()
+                lines=conn.execute('select * from purchase_order_lines where order_id=any(%s) order by item_name',([o['id'] for o in orders],)).fetchall() if orders else []
+                for order in orders:order['lines']=[l for l in lines if l['order_id']==order['id']]
+                result['orders']=orders;result['suppliers']=conn.execute('select * from suppliers where user_id=%s order by name',(uid,)).fetchall()
+            if section in ('all','stocktake'):
+                counts=conn.execute('select t.*,u.display_name actor_name from stocktakes t left join app_users u on u.id=t.actor_id where t.user_id=%s order by t.created_at desc limit 100',(uid,)).fetchall()
+                lines=conn.execute('select * from stocktake_lines where stocktake_id=any(%s) order by item_name',([c['id'] for c in counts],)).fetchall() if counts else []
+                for count in counts:count['lines']=[l for l in lines if l['stocktake_id']==count['id']]
+                result['stocktakes']=counts
+            if section in ('all','waste'):result['waste']=conn.execute('select w.*,u.display_name actor_name from waste_events w left join app_users u on u.id=w.actor_id where w.user_id=%s order by occurred_at desc limit 200',(uid,)).fetchall()
+            if section in ('all','closing'):result['closures']=conn.execute('select * from day_closures where user_id=%s order by business_date desc,closed_at desc limit 100',(uid,)).fetchall()
+            if section=='clock':result['closures']=conn.execute('select id from day_closures where user_id=%s limit 1',(uid,)).fetchall()
+            if section in ('all','audit'):result['audit']=conn.execute("select a.*,coalesce(nullif(u.display_name,''),u.email,'Former member') actor_name from audit_events a left join app_users u on u.id=a.actor_id where a.user_id=%s order by a.created_at desc limit 200",(uid,)).fetchall()
+            if section in ('all','team'):
+                result['members']=conn.execute('select u.id,u.email,u.display_name from bar_members m join app_users u on u.id=m.member_id where m.owner_id=%s order by u.display_name',(uid,)).fetchall()
+                if str(uid)==str(actor_id(request)):result['invites']=conn.execute('select id,email,expires_at from bar_invites where owner_id=%s and accepted_at is null and revoked_at is null and expires_at>now() order by created_at desc',(uid,)).fetchall()
+            return result
 
     @app.get('/api/dashboard')
     def dashboard(request:Request,period:Literal['today','week','month','custom']='week',start:date|None=None,end:date|None=None):
@@ -285,13 +293,13 @@ def register_management(app,db,user_id,actor_id):
             if end<start or (end-start).days>365:raise HTTPException(400,'Choose a range of up to 366 days')
             days=(end-start).days+1;previous=period_totals(conn,uid,start-timedelta(days=days),start-timedelta(days=1));totals=period_totals(conn,uid,start,end)
             a,b=bounds(conn,uid,start,end);tz,hour=bar_clock(conn,uid)
-            daily=conn.execute('''select ((sold_at at time zone %s)-(%s*interval '1 hour'))::date day,sum(quantity*unit_price::bigint) revenue,sum(quantity) units
+            daily=conn.execute('''select ((sold_at at time zone %s)-(%s*interval '1 hour'))::date as "day",sum(quantity*unit_price::bigint) revenue,sum(quantity) units
                 from sales where user_id=%s and sold_at>=%s and sold_at<%s group by 1 order by 1''',(str(tz),hour,uid,a,b)).fetchall()
             by_day={r['day']:r for r in daily};series=[by_day.get(start+timedelta(days=i),{'day':start+timedelta(days=i),'revenue':0,'units':0}) for i in range(days)]
-            ranking=conn.execute('''select cocktail_id,item_name name,sum(quantity) units,sum(quantity*unit_price::bigint) revenue,
-                sum(quantity*(unit_price-material_cost_per_unit)) filter(where material_cost_per_unit is not null) contribution,
-                count(*) filter(where material_cost_per_unit is null) uncosted_entries from sales where user_id=%s and sold_at>=%s and sold_at<%s
-                group by cocktail_id,item_name order by units desc,revenue desc''',(uid,a,b)).fetchall()
+            ranking=conn.execute('''select s.cocktail_id,coalesce(c.name,s.item_name) name,sum(s.quantity) units,sum(s.quantity*s.unit_price::bigint) revenue,
+                sum(s.quantity*(s.unit_price-s.material_cost_per_unit)) filter(where s.material_cost_per_unit is not null) contribution,
+                count(*) filter(where s.material_cost_per_unit is null) uncosted_entries from sales s left join cocktails c on c.id=s.cocktail_id and c.user_id=s.user_id where s.user_id=%s and s.sold_at>=%s and s.sold_at<%s
+                group by s.cocktail_id,coalesce(c.name,s.item_name) order by units desc,revenue desc''',(uid,a,b)).fetchall()
             recipes,value,unknown=recipe_report(conn,uid)
             return {'start':start,'end':end,'totals':totals,'previous':previous,'series':series,'ranking':ranking,
                 'inventory_value':value,'unvalued_items':unknown,'blocked_recipes':[r for r in recipes if r['short']],
@@ -351,6 +359,15 @@ def register_management(app,db,user_id,actor_id):
             result=conn.execute('update suppliers set name=%s,contact=%s,email=%s,phone=%s,lead_days=%s,note=%s where id=%s and user_id=%s',(data.name,data.contact,data.email,data.phone,data.lead_days,data.note,supplier_id,uid))
             if not result.rowcount:raise HTTPException(404,'Supplier not found')
             log(conn,uid,request,f'Updated supplier: {data.name}')
+        return {'ok':True}
+
+    @app.delete('/api/suppliers/{supplier_id}')
+    def delete_supplier(supplier_id:UUID,request:Request):
+        uid=owner(request)
+        with db() as conn:
+            row=conn.execute('delete from suppliers where id=%s and user_id=%s returning name',(supplier_id,uid)).fetchone()
+            if not row:raise HTTPException(404,'Supplier not found')
+            log(conn,uid,request,f'Removed supplier: {row["name"]}')
         return {'ok':True}
 
     @app.post('/api/purchases')
