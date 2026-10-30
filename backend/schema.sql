@@ -107,3 +107,86 @@ create table if not exists restock_batches (
 
 alter table app_users add column if not exists preferred_unit text not null default 'ml' check(preferred_unit in ('ml','oz'));
 alter table recipe_ingredients add column if not exists amount_unit text check(amount_unit in ('ml','oz','drop','dash','piece'));
+
+-- Operations workspace: existing user_id remains the bar owner's stable scope.
+alter table app_users add column if not exists bar_timezone text not null default 'Asia/Tokyo';
+alter table app_users add column if not exists day_start integer not null default 4 check(day_start between 0 and 12);
+alter table sales add column if not exists material_cost_per_unit numeric check(material_cost_per_unit >= 0);
+create table if not exists bar_members (
+ owner_id uuid not null references app_users(id) on delete cascade,
+ member_id uuid not null references app_users(id) on delete cascade,
+ created_at timestamptz not null default now(),primary key(owner_id,member_id),check(owner_id<>member_id)
+);
+create table if not exists bar_invites (
+ id uuid primary key,owner_id uuid not null references app_users(id) on delete cascade,
+ email text not null,expires_at timestamptz not null default now()+interval '7 days',
+ accepted_at timestamptz,revoked_at timestamptz,created_at timestamptz not null default now()
+);
+create table if not exists audit_events (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ actor_id uuid references app_users(id) on delete set null,action text not null,
+ created_at timestamptz not null default now()
+);
+create index if not exists audit_user_time on audit_events(user_id,created_at desc);
+create table if not exists operation_requests (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ kind text not null,request_hash text not null,created_at timestamptz not null default now()
+);
+create table if not exists stocktakes (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ actor_id uuid references app_users(id) on delete set null,note text not null default '',
+ created_at timestamptz not null default now()
+);
+create table if not exists stocktake_lines (
+ id bigint generated always as identity primary key,stocktake_id uuid not null references stocktakes(id) on delete cascade,
+ item_name text not null,unit text not null,expected numeric not null,actual numeric not null,
+ cost_variance numeric
+);
+create table if not exists waste_events (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ actor_id uuid references app_users(id) on delete set null,
+ inventory_id uuid references inventory(id) on delete set null,item_name text not null,unit text not null,
+ amount numeric not null check(amount>0),reason text not null,note text not null default '',
+ material_cost numeric,occurred_at timestamptz not null,created_at timestamptz not null default now()
+);
+create index if not exists waste_user_time on waste_events(user_id,occurred_at desc);
+create table if not exists suppliers (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ name text not null,contact text not null default '',email text not null default '',phone text not null default '',
+ lead_days integer not null default 0 check(lead_days between 0 and 365),note text not null default ''
+);
+create table if not exists purchase_orders (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ supplier_id uuid references suppliers(id) on delete set null,supplier_name text not null,
+ status text not null default 'draft' check(status in ('draft','ordered','partial','received','cancelled')),
+ expected_date date,note text not null default '',created_at timestamptz not null default now(),ordered_at timestamptz
+);
+create table if not exists purchase_order_lines (
+ id uuid primary key,order_id uuid not null references purchase_orders(id) on delete cascade,
+ inventory_id uuid references inventory(id) on delete set null,item_name text not null,unit text not null,
+ bottle_size numeric not null check(bottle_size>0),bottles numeric not null check(bottles>0),
+ received_bottles numeric not null default 0 check(received_bottles>=0 and received_bottles<=bottles),
+ unit_price integer check(unit_price>=0)
+);
+create table if not exists purchase_receipts (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ order_id uuid not null references purchase_orders(id),actor_id uuid references app_users(id),
+ lines jsonb not null,created_at timestamptz not null default now()
+);
+create table if not exists day_closures (
+ id uuid primary key,user_id uuid not null references app_users(id) on delete cascade,
+ actor_id uuid references app_users(id),business_date date not null,snapshot jsonb not null,
+ opening_cash numeric not null check(opening_cash>=0),actual_cash numeric not null check(actual_cash>=0),
+ note text not null default '',closed_at timestamptz not null default now(),
+ reopened_at timestamptz,reopen_reason text
+);
+create unique index if not exists one_active_day_close on day_closures(user_id,business_date) where reopened_at is null;
+
+create index if not exists members_member on bar_members(member_id);
+create index if not exists invites_pending_email on bar_invites(lower(email)) where accepted_at is null and revoked_at is null;
+create index if not exists stocktakes_user_time on stocktakes(user_id,created_at desc);
+create index if not exists suppliers_user_name on suppliers(user_id,name);
+create index if not exists purchases_user_time on purchase_orders(user_id,created_at desc);
+create index if not exists purchase_lines_order on purchase_order_lines(order_id);
+create index if not exists stocktake_lines_parent on stocktake_lines(stocktake_id);
+create index if not exists closures_user_date on day_closures(user_id,business_date desc);

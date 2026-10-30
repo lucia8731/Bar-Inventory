@@ -66,6 +66,26 @@ jobs:
           done
           docker logs bar-test
           exit 1
+      - name: Check authenticated reports and timezone data in the production image
+        run: |
+          docker exec -i bar-test /opt/venv/bin/python - <<'PYCODE'
+          import os, json, base64, urllib.request
+          from uuid import uuid4
+          from zoneinfo import ZoneInfo
+          from itsdangerous import TimestampSigner
+          import psycopg
+          assert str(ZoneInfo('Asia/Tokyo')) == 'Asia/Tokyo'
+          uid = uuid4()
+          with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+              conn.execute('insert into app_users(id,google_sub,email) values(%s,%s,%s)', (uid,str(uid),'container-check@example.invalid'))
+          value = TimestampSigner(os.environ['SESSION_SECRET']).sign(base64.b64encode(json.dumps({'user_id':str(uid)}).encode())).decode()
+          for path in ('/api/dashboard', '/api/management?section=clock', '/api/workspaces'):
+              request = urllib.request.Request('http://127.0.0.1:10000'+path, headers={'Cookie':'bar_session='+value})
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  assert response.status == 200
+                  json.load(response)
+          print('Authenticated reports and business-day timezone checks passed.')
+          PYCODE
   blueprint:
     runs-on: ubuntu-latest
     steps:
